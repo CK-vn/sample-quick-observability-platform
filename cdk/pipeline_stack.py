@@ -206,6 +206,25 @@ class PipelineStack(Stack):
                 resources=[self.data_lake_key.key_arn]
             )
         )
+        # CloudWatch Logs (via the subscription filter's CloudWatchLogsRole) calls
+        # firehose:PutRecord/PutRecordBatch directly -- including when CloudFormation
+        # sends the one-time test message during AWS::Logs::SubscriptionFilter
+        # creation. Firehose's CMK-encrypted stream requires the caller to also hold
+        # KMS permissions on the CMK, so this role needs the same grant as the
+        # Firehose service role itself. Without this, subscription filter creation
+        # fails with "grant for the CMK ... might have been revoked or caller might
+        # not have sufficient permissions for the CMK".
+        cloudwatch_logs_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "kms:Decrypt",
+                    "kms:Encrypt",
+                    "kms:GenerateDataKey"
+                ],
+                resources=[self.data_lake_key.key_arn]
+            )
+        )
 
         # ====================================================================
         # Lambda Functions
@@ -314,8 +333,8 @@ class PipelineStack(Stack):
                     prefix=s3_prefix,
                     error_output_prefix=f"errors/{s3_prefix.split('/')[0]}/",
                     buffering_hints=firehose.CfnDeliveryStream.BufferingHintsProperty(
-                        size_in_m_bs=128,
-                        interval_in_seconds=900
+                        size_in_m_bs=1,
+                        interval_in_seconds=60
                     ),
                     compression_format="GZIP",
                     processing_configuration=firehose.CfnDeliveryStream.ProcessingConfigurationProperty(
