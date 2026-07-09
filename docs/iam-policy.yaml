@@ -1,0 +1,406 @@
+# ==============================================================================
+# Amazon Quick Observability Platform — Deployment IAM Policy
+# ==============================================================================
+#
+# Purpose: attach this policy (or an equivalent) to the IAM user/role that
+# will run deploy.py, scripts/setup_datacatalog.py, scripts/create_topic.py,
+# and cleanup.py against a NEW AWS account/region.
+#
+# See REQUIRED_PERMISSIONS.txt in this same folder for the plain-text
+# breakdown of what each statement is for and which deployment step needs it.
+#
+# HOW TO USE
+# ----------
+# This file is an IAM policy document body (the "Statement" list plus
+# "Version"), not a CloudFormation/CDK template. To attach it:
+#
+#   Option A (AWS CLI, JSON required):
+#     Convert to JSON first (yq -o=json iam-policy.yaml > iam-policy.json,
+#     or any YAML->JSON tool), then:
+#       aws iam create-policy --policy-name QuickObservabilityDeploy \
+#         --policy-document file://iam-policy.json
+#       aws iam attach-user-policy --user-name <deployer> \
+#         --policy-arn arn:aws:iam::<account-id>:policy/QuickObservabilityDeploy
+#
+#   Option B (Console):
+#     IAM -> Policies -> Create policy -> JSON tab -> paste the converted
+#     JSON -> attach to the deploying user or role.
+#
+# IMPORTANT CAVEATS BEFORE ATTACHING
+# -----------------------------------
+# 1. Resource scoping: most statements below use "Resource": "*" because
+#    resource names/ARNs (KMS key, S3 buckets, Firehose streams, etc.) don't
+#    exist yet on a brand-new account and are only known after Step 1
+#    completes. This is intentionally broad for FIRST DEPLOYMENT. Once
+#    resources exist, consider tightening Resource ARNs to the specific
+#    resource-prefix used (e.g. "arn:aws:s3:::<prefix>-pipeline-datalake-*")
+#    and re-attaching a scoped-down policy for ongoing operations.
+# 2. This policy does NOT include CDK bootstrap permissions (creating the
+#    CDKToolkit stack) — that's a one-time, account-wide setup usually done
+#    once by a cloud/account admin, not the day-to-day deployer. See
+#    REQUIRED_PERMISSIONS.txt section 0 if bootstrap is also needed.
+# 3. This policy does NOT include, and CANNOT include, two things that live
+#    outside IAM entirely:
+#      - Quick Sight's own "AWS resources" S3/Athena allow-list
+#        (AWSQuickSightS3Policy), maintained via the Quick Sight console
+#        ("Manage Quick Sight -> Security & permissions").
+#      - Any pre-existing Quick Sight IAM Policy Assignment scoped to "all
+#        users"/"all groups", which acts as a session policy on top of the
+#        Quick Sight service role and can silently restrict what Quick
+#        Sight itself is allowed to do, independent of this policy.
+#    Both must be checked/configured by a Quick Sight administrator
+#    separately. See REQUIRED_PERMISSIONS.txt sections 5 and the summary at
+#    the end for details.
+# 4. If your organization uses AWS Lake Formation, do NOT attach
+#    LakeFormationAdminPrivileges below by default — see the comment on
+#    that statement.
+#
+# ==============================================================================
+
+Version: "2012-10-17"
+Statement:
+
+  # ---------------------------------------------------------------------------
+  # Identity / account detection — used by every deployment step
+  # ---------------------------------------------------------------------------
+  - Sid: IdentityAndStackManagement
+    Effect: Allow
+    Action:
+      - sts:GetCallerIdentity
+      - cloudformation:DescribeStacks
+      - cloudformation:ListStacks
+      - cloudformation:DescribeStackEvents
+      - cloudformation:DescribeStackResources
+      - cloudformation:ListStackResources
+      - cloudformation:CreateChangeSet
+      - cloudformation:ExecuteChangeSet
+      - cloudformation:DeleteChangeSet
+      - cloudformation:DescribeChangeSet
+      - cloudformation:CreateStack
+      - cloudformation:UpdateStack
+      - cloudformation:DeleteStack
+      - cloudformation:GetTemplate
+    Resource: "*"
+
+  # ---------------------------------------------------------------------------
+  # Step 1 — CloudWatch Logs setup (KMS key, log groups, vended logs delivery)
+  # ---------------------------------------------------------------------------
+  - Sid: KmsKeyManagement
+    Effect: Allow
+    Action:
+      - kms:CreateKey
+      - kms:DescribeKey
+      - kms:CreateAlias
+      - kms:DeleteAlias
+      - kms:EnableKeyRotation
+      - kms:GetKeyRotationStatus
+      - kms:PutKeyPolicy
+      - kms:GetKeyPolicy
+      - kms:ScheduleKeyDeletion
+      - kms:TagResource
+      - kms:CreateGrant
+      - kms:RevokeGrant
+      - kms:ListGrants
+      - kms:Decrypt
+      - kms:Encrypt
+      - kms:GenerateDataKey
+      - kms:GenerateDataKey*
+      - kms:ReEncrypt*
+    Resource: "*"
+
+  - Sid: CloudWatchLogsAndVendedDelivery
+    Effect: Allow
+    Action:
+      - logs:CreateLogGroup
+      - logs:DeleteLogGroup
+      - logs:DescribeLogGroups
+      - logs:TagResource
+      - logs:PutDataProtectionPolicy
+      - logs:GetDataProtectionPolicy
+      - logs:AssociateKmsKey
+      - logs:DisassociateKmsKey
+      - logs:PutDeliverySource
+      - logs:GetDeliverySource
+      - logs:DeleteDeliverySource
+      - logs:PutDeliveryDestination
+      - logs:GetDeliveryDestination
+      - logs:DeleteDeliveryDestination
+      - logs:PutDeliveryDestinationPolicy
+      - logs:GetDeliveryDestinationPolicy
+      - logs:CreateDelivery
+      - logs:GetDelivery
+      - logs:DeleteDelivery
+      - logs:DescribeDeliveries
+      - logs:PutSubscriptionFilter
+      - logs:DeleteSubscriptionFilter
+      - logs:DescribeSubscriptionFilters
+    Resource: "*"
+
+  - Sid: QuickVendedLogsAuthorization
+    Effect: Allow
+    Action:
+      # Required for Amazon Quick to deliver logs into the CloudWatch Log
+      # Groups created in Step 1. Without this, Step 1 completes but no
+      # logs ever arrive.
+      - quicksight:AllowVendedLogDeliveryForResource
+    Resource: "*"
+
+  - Sid: QuickReadOnlyDetection
+    Effect: Allow
+    Action:
+      # Read-only; used to auto-detect the Amazon Quick subscription region,
+      # edition, and available Quick Sight users.
+      - quicksight:ListNamespaces
+      - quicksight:DescribeAccountSubscription
+      - quicksight:ListUsers
+      - quicksight:DescribeUser
+    Resource: "*"
+
+  # ---------------------------------------------------------------------------
+  # Step 2 — Data pipeline (S3 data lake, Lambda, Firehose, EventBridge)
+  # ---------------------------------------------------------------------------
+  - Sid: S3DataLakeAndResultsBuckets
+    Effect: Allow
+    Action:
+      - s3:CreateBucket
+      - s3:PutBucketPolicy
+      - s3:PutBucketVersioning
+      - s3:PutEncryptionConfiguration
+      - s3:PutBucketPublicAccessBlock
+      - s3:PutBucketOwnershipControls
+      - s3:GetBucketLocation
+      - s3:ListBucket
+      - s3:PutObject
+      - s3:GetObject
+      - s3:GetObjectVersion
+      - s3:ListBucketMultipartUploads
+      - s3:ListMultipartUploadParts
+      - s3:AbortMultipartUpload
+      - s3:DeleteObject
+      - s3:DeleteObjectVersion
+    Resource: "*"
+
+  - Sid: LambdaTransformFunctions
+    Effect: Allow
+    Action:
+      - lambda:CreateFunction
+      - lambda:UpdateFunctionCode
+      - lambda:UpdateFunctionConfiguration
+      - lambda:GetFunction
+      - lambda:DeleteFunction
+      - lambda:AddPermission
+      - lambda:RemovePermission
+      - lambda:TagResource
+      - lambda:PublishVersion
+    Resource: "*"
+
+  - Sid: FirehoseDeliveryStreams
+    Effect: Allow
+    Action:
+      - firehose:CreateDeliveryStream
+      - firehose:DescribeDeliveryStream
+      - firehose:DeleteDeliveryStream
+      - firehose:UpdateDestination
+      - firehose:TagDeliveryStream
+    Resource: "*"
+
+  - Sid: EventBridgeCloudTrailRule
+    Effect: Allow
+    Action:
+      - events:PutRule
+      - events:DescribeRule
+      - events:DeleteRule
+      - events:PutTargets
+      - events:RemoveTargets
+      - events:TagResource
+    Resource: "*"
+
+  - Sid: IamRolesForPipelineServices
+    Effect: Allow
+    Action:
+      - iam:CreateRole
+      - iam:DeleteRole
+      - iam:GetRole
+      - iam:PutRolePolicy
+      - iam:DeleteRolePolicy
+      - iam:GetRolePolicy
+      - iam:AttachRolePolicy
+      - iam:DetachRolePolicy
+      - iam:ListAttachedRolePolicies
+      - iam:ListRolePolicies
+      - iam:TagRole
+    Resource: "*"
+
+  - Sid: IamPassRoleForServiceRoles
+    Effect: Allow
+    Action:
+      - iam:PassRole
+    Resource: "*"
+    Condition:
+      StringEquals:
+        # Restrict PassRole to the AWS services this stack actually assigns
+        # roles to (Lambda, Firehose, CloudWatch Logs, EventBridge). Adjust
+        # if your organization requires PassRole conditions scoped to
+        # specific role name patterns instead.
+        iam:PassedToService:
+          - lambda.amazonaws.com
+          - firehose.amazonaws.com
+          - logs.amazonaws.com
+          - events.amazonaws.com
+
+  # ---------------------------------------------------------------------------
+  # Step 3 — Data catalog (Glue + Athena)
+  # ---------------------------------------------------------------------------
+  - Sid: GlueDataCatalog
+    Effect: Allow
+    Action:
+      - glue:CreateDatabase
+      - glue:GetDatabase
+      - glue:DeleteDatabase
+      - glue:CreateTable
+      - glue:GetTable
+      - glue:GetTables
+      - glue:UpdateTable
+      - glue:DeleteTable
+      - glue:BatchCreatePartition
+    Resource: "*"
+
+  - Sid: AthenaQueries
+    Effect: Allow
+    Action:
+      - athena:StartQueryExecution
+      - athena:GetQueryExecution
+      - athena:GetQueryResults
+      - athena:StopQueryExecution
+      - athena:GetWorkGroup
+      - athena:ListWorkGroups
+    Resource: "*"
+
+  # OPTIONAL — only needed if the data catalog step uses
+  # --access-control lakeformation instead of --access-control iam.
+  # NOTE: being able to CALL these Lake Formation APIs is not enough; the
+  # deploying identity must ALSO be registered as a Lake Formation data lake
+  # administrator (an account-wide setting, separate from IAM) before these
+  # calls will succeed. Do not attach / rely on this statement unless your
+  # organization has deliberately decided to use Lake Formation for this
+  # project and has granted that administrator privilege out-of-band.
+  - Sid: LakeFormationAccessControlOptional
+    Effect: Allow
+    Action:
+      - lakeformation:RegisterResource
+      - lakeformation:DeregisterResource
+      - lakeformation:DescribeResource
+      - lakeformation:GrantPermissions
+      - lakeformation:RevokePermissions
+      - lakeformation:GetDataLakeSettings
+      - lakeformation:PutDataLakeSettings
+      - lakeformation:GetDataAccess
+    Resource: "*"
+
+  # ---------------------------------------------------------------------------
+  # Step 4 — Quick Sight dashboard (theme, data source, datasets, analysis,
+  # dashboard, refresh schedules)
+  # ---------------------------------------------------------------------------
+  - Sid: QuickSightThemeManagement
+    Effect: Allow
+    Action:
+      - quicksight:CreateTheme
+      - quicksight:DescribeTheme
+      - quicksight:UpdateTheme
+      - quicksight:DeleteTheme
+      - quicksight:UpdateThemePermissions
+      - quicksight:DescribeThemePermissions
+      - quicksight:CreateThemeAlias
+      - quicksight:ListThemeAliases
+      - quicksight:ListThemeVersions
+    Resource: "*"
+
+  - Sid: QuickSightDataSourceManagement
+    Effect: Allow
+    Action:
+      - quicksight:CreateDataSource
+      - quicksight:DescribeDataSource
+      - quicksight:UpdateDataSource
+      - quicksight:DeleteDataSource
+      - quicksight:UpdateDataSourcePermissions
+      - quicksight:DescribeDataSourcePermissions
+      - quicksight:PassDataSource
+    Resource: "*"
+
+  - Sid: QuickSightDataSetManagement
+    Effect: Allow
+    Action:
+      - quicksight:CreateDataSet
+      - quicksight:DescribeDataSet
+      - quicksight:UpdateDataSet
+      - quicksight:DeleteDataSet
+      - quicksight:UpdateDataSetPermissions
+      - quicksight:DescribeDataSetPermissions
+      - quicksight:PassDataSet
+      - quicksight:DescribeIngestion
+      - quicksight:ListIngestions
+      - quicksight:CreateIngestion
+      - quicksight:CancelIngestion
+    Resource: "*"
+
+  - Sid: QuickSightRefreshSchedules
+    Effect: Allow
+    Action:
+      - quicksight:CreateRefreshSchedule
+      - quicksight:DescribeRefreshSchedule
+      - quicksight:UpdateRefreshSchedule
+      - quicksight:DeleteRefreshSchedule
+      - quicksight:ListRefreshSchedules
+    Resource: "*"
+
+  - Sid: QuickSightAnalysisManagement
+    Effect: Allow
+    Action:
+      - quicksight:CreateAnalysis
+      - quicksight:DescribeAnalysis
+      - quicksight:UpdateAnalysis
+      - quicksight:DeleteAnalysis
+      - quicksight:QueryAnalysis
+      - quicksight:RestoreAnalysis
+      - quicksight:UpdateAnalysisPermissions
+      - quicksight:DescribeAnalysisPermissions
+    Resource: "*"
+
+  - Sid: QuickSightDashboardManagement
+    Effect: Allow
+    Action:
+      - quicksight:CreateDashboard
+      - quicksight:DescribeDashboard
+      - quicksight:UpdateDashboard
+      - quicksight:DeleteDashboard
+      - quicksight:QueryDashboard
+      - quicksight:ListDashboardVersions
+      - quicksight:UpdateDashboardPermissions
+      - quicksight:DescribeDashboardPermissions
+      - quicksight:UpdateDashboardPublishedVersion
+    Resource: "*"
+
+  # ---------------------------------------------------------------------------
+  # Step 5 — Quick Sight Topic (scripts/create_topic.py)
+  # ---------------------------------------------------------------------------
+  - Sid: QuickSightTopicManagement
+    Effect: Allow
+    Action:
+      - quicksight:CreateTopic
+      - quicksight:DescribeTopic
+      - quicksight:UpdateTopic
+      - quicksight:DeleteTopic
+      - quicksight:UpdateTopicPermissions
+      - quicksight:DescribeTopicPermissions
+      - quicksight:CreateTopicRefreshSchedule
+      - quicksight:UpdateTopicRefreshSchedule
+      - quicksight:DeleteTopicRefreshSchedule
+      - quicksight:ListTopicRefreshSchedules
+      - quicksight:DescribeTopicRefreshSchedule
+    Resource: "*"
+
+  # ---------------------------------------------------------------------------
+  # Cleanup (cleanup.py) — reuses most Allow statements above for delete
+  # operations. No additional actions required beyond what's already listed,
+  # except dropping the Athena database, already covered by AthenaQueries.
+  # ---------------------------------------------------------------------------
