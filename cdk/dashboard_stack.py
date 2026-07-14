@@ -58,6 +58,8 @@ SELECT
     surface_type,
     web_search,
     message_scope,
+    user_message,
+    system_text_message,
     account_id,
     year, month, day
 FROM {database}.chat_logs
@@ -79,6 +81,8 @@ WHERE timestamp IS NOT NULL
             {"Name": "surface_type", "Type": "STRING"},
             {"Name": "web_search", "Type": "STRING"},
             {"Name": "message_scope", "Type": "STRING"},
+            {"Name": "user_message", "Type": "STRING"},
+            {"Name": "system_text_message", "Type": "STRING"},
             {"Name": "account_id", "Type": "STRING"},
             {"Name": "year", "Type": "INTEGER"},
             {"Name": "month", "Type": "INTEGER"},
@@ -89,6 +93,7 @@ WHERE timestamp IS NOT NULL
             "conversation_id", "agent_id", "flow_id",
             "latency_ms", "time_to_first_token_ms",
             "surface_type", "web_search", "message_scope",
+            "user_message", "system_text_message",
             "action_connectors", "namespace", "account_id",
         ],
     },
@@ -340,6 +345,50 @@ FROM {database}.index_usage
             "account_id",
         ],
     },
+    {
+        "id_suffix": "licensed-users",
+        "name": "Licensed Users",
+        "description": (
+            "Licensed Quick Sight users joined against their most recent "
+            "activity timestamp and computed inactivity period"
+        ),
+        "sql": "SELECT * FROM {database}.licensed_users_activity",
+        "input_columns": [
+            {"Name": "user_name", "Type": "STRING"},
+            {"Name": "user_arn", "Type": "STRING"},
+            {"Name": "email", "Type": "STRING"},
+            {"Name": "role", "Type": "STRING"},
+            {"Name": "last_activity_timestamp", "Type": "DATETIME"},
+            {"Name": "first_seen_date", "Type": "DATETIME"},
+            {"Name": "inactivity_period", "Type": "INTEGER"},
+            {"Name": "account_id", "Type": "STRING"},
+        ],
+        "projected_columns": [
+            "user_name", "user_arn", "email", "role",
+            "last_activity_timestamp", "first_seen_date",
+            "inactivity_period", "account_id",
+        ],
+    },
+    {
+        "id_suffix": "function-usage-distribution",
+        "name": "Function Usage Distribution",
+        "description": (
+            "Combined Chat Activity and Agent Hours Usage records labeled "
+            "by function category for a percentage-of-total breakdown"
+        ),
+        "sql": "SELECT * FROM {database}.function_usage_distribution",
+        "input_columns": [
+            {"Name": "event_time", "Type": "DATETIME"},
+            {"Name": "user_name", "Type": "STRING"},
+            {"Name": "category", "Type": "STRING"},
+            {"Name": "year", "Type": "INTEGER"},
+            {"Name": "month", "Type": "INTEGER"},
+            {"Name": "day", "Type": "INTEGER"},
+        ],
+        "projected_columns": [
+            "event_time", "user_name", "category",
+        ],
+    },
 ]
 
 
@@ -360,6 +409,8 @@ TOPIC_COLUMNS = {
         {"ColumnName": "surface_type", "ColumnFriendlyName": "Surface Type", "ColumnDescription": "Where the chat originated (console, IDE, etc.)", "ColumnSynonyms": ["channel", "interface", "source", "origin"], "IsIncludedInTopic": True, "SemanticType": {"TypeName": "CATEGORY"}},
         {"ColumnName": "web_search", "ColumnFriendlyName": "Web Search Used", "ColumnDescription": "Whether web search was used for the response", "ColumnSynonyms": ["internet", "web", "search"], "IsIncludedInTopic": True, "SemanticType": {"TypeName": "CATEGORY"}},
         {"ColumnName": "message_scope", "ColumnFriendlyName": "Message Scope", "ColumnDescription": "Resource scope of the message: no_resources, all_resources, or specific_resource", "ColumnSynonyms": ["scope", "resource scope", "context"], "IsIncludedInTopic": True, "SemanticType": {"TypeName": "CATEGORY"}},
+        {"ColumnName": "user_message", "ColumnFriendlyName": "User Message", "ColumnDescription": "Free-text message written by the user", "ColumnSynonyms": ["question", "prompt", "user text", "written message"], "IsIncludedInTopic": True},
+        {"ColumnName": "system_text_message", "ColumnFriendlyName": "Assistant Response", "ColumnDescription": "Free-text response written by the assistant", "ColumnSynonyms": ["answer", "reply", "response text", "assistant text"], "IsIncludedInTopic": True},
         {"ColumnName": "namespace", "ColumnFriendlyName": "Namespace", "IsIncludedInTopic": True},
         {"ColumnName": "account_id", "ColumnFriendlyName": "Account Id", "IsIncludedInTopic": False},
     ],
@@ -474,12 +525,17 @@ CUSTOM_INSTRUCTIONS = (
 
 # ── Visual / layout helpers ───────────────────────────────────────────────
 
-def _make_visual(visual_id, title, visual_type, field_wells, drill_path=None):
+def _make_visual(visual_id, title, visual_type, field_wells, drill_path=None,
+                  dataset=None, missing_data_treatment=None):
     """Build a simplified visual spec dict.
     
     drill_path: optional list of column names for drill-down hierarchy.
     E.g. ["feature", "user_name", "conversation_id"] lets users click
     feature → user → conversation.
+    dataset: optional DATASET_CONFIGS id_suffix override. When omitted, the
+    visual sources from its sheet's own dataset.
+    missing_data_treatment: optional TreatmentOption (e.g. "SHOW_AS_ZERO")
+    applied to a LINE visual's PrimaryYAxisMissingDataConfiguration.
     """
     return {
         "visual_id": visual_id,
@@ -487,6 +543,8 @@ def _make_visual(visual_id, title, visual_type, field_wells, drill_path=None):
         "type": visual_type,
         "field_wells": field_wells,
         "drill_path": drill_path,
+        "dataset": dataset,
+        "missing_data_treatment": missing_data_treatment,
     }
 
 
@@ -506,9 +564,10 @@ SHEET_DEFS = [
                          {"values": [{"field": "user_name", "agg": "DISTINCT_COUNT"}]}),
             _make_visual("adopt-kpi-convos", "Total Chat Sessions", "KPI",
                          {"values": [{"field": "conversation_id", "agg": "DISTINCT_COUNT"}]}),
-            _make_visual("adopt-trend", "User Adoption Trend", "LINE",
+            _make_visual("adopt-trend", "Daily Active Users", "LINE",
                          {"category": "event_time", "values": [{"field": "user_name", "agg": "DISTINCT_COUNT"}]},
-                         drill_path=["event_time", "feature", "user_name"]),
+                         drill_path=["event_time", "feature", "user_name"],
+                         missing_data_treatment="SHOW_AS_ZERO"),
             _make_visual("adopt-features", "Chat Sessions by Feature", "BAR",
                          {"category": "feature", "values": [{"field": "conversation_id", "agg": "DISTINCT_COUNT"}]},
                          drill_path=["feature", "user_name"]),
@@ -519,12 +578,20 @@ SHEET_DEFS = [
                          {"category": "event_time", "values": [{"field": "conversation_id", "agg": "DISTINCT_COUNT"}],
                           "group": "feature"},
                          drill_path=["event_time", "feature", "user_name"]),
+            _make_visual("adopt-usage-volume-total", "Usage Volume by Day", "BAR",
+                         {"category": "event_time", "values": [{"field": "conversation_id", "agg": "DISTINCT_COUNT"}]},
+                         drill_path=["event_time", "feature", "user_name"]),
+            _make_visual("adopt-usage-volume-avg", "Average Daily Usage Volume", "KPI",
+                         {"values": [{"field": "daily_avg_usage_volume", "agg": "NONE"}]}),
+            _make_visual("adopt-function-distribution", "Function Usage Distribution", "PIE",
+                         {"category": "category", "values": [{"field": "category", "agg": "COUNT"}]},
+                         dataset="function-usage-distribution"),
             _make_visual("adopt-by-status", "Sessions by Status", "BAR",
                          {"category": "status", "values": [{"field": "conversation_id", "agg": "DISTINCT_COUNT"}]},
                          drill_path=["status", "user_name"]),
             _make_visual("adopt-details", "Chat Session Details", "TABLE",
                          {"category": "event_time",
-                          "extra_dimensions": ["user_name", "feature", "status", "conversation_id", "latency_ms", "surface_type"],
+                          "extra_dimensions": ["user_name", "feature", "status", "conversation_id", "latency_ms", "surface_type", "user_message", "system_text_message"],
                           "values": [],
                           "sort_desc": "event_time"}),
         ],
@@ -551,6 +618,11 @@ SHEET_DEFS = [
                          {"category": "event_time", "values": [{"field": "hours", "agg": "SUM"}],
                           "group": "service"},
                          drill_path=["event_time", "service", "user_name"]),
+            _make_visual("cost-hours-volume-total", "Agent Hours Volume by Day", "BAR",
+                         {"category": "event_time", "values": [{"field": "hours", "agg": "SUM"}]},
+                         drill_path=["event_time", "resource_type", "user_name"]),
+            _make_visual("cost-hours-volume-avg", "Average Daily Agent Hours", "KPI",
+                         {"values": [{"field": "daily_avg_agent_hours", "agg": "NONE"}]}),
             _make_visual("cost-details", "Agent Hours Details", "TABLE",
                          {"category": "event_time",
                           "extra_dimensions": ["user_name", "service", "hours", "usage_group", "resource_type", "resource_id"],
@@ -626,6 +698,28 @@ SHEET_DEFS = [
         "visual_filters": [
             {"visual_id": "idx-top-kb", "column": "source_type", "values": ["KB"]},
             {"visual_id": "idx-top-spaces", "column": "source_type", "values": ["SPACE"]},
+        ],
+    },
+    # ── Sheet 6: Licensed Users ──────────────────────────────────────────
+    # "Which licensed users are inactive, and by how much, so licenses can
+    # be reclaimed?" This sheet's dataset ("licensed-users") has no
+    # event_time column — it is keyed on inactivity_period instead — so it
+    # is excluded from the generic sheet-level date-range filter/controls
+    # and instead gets its own InactivityThresholdDays slider + filter.
+    {
+        "id_suffix": "licensed-users",
+        "name": "Licensed Users",
+        "dataset": "licensed-users",
+        "visuals": [
+            _make_visual("licensed-kpi-total", "Total Licensed Users", "KPI",
+                         {"values": [{"field": "user_name", "agg": "DISTINCT_COUNT"}]}),
+            _make_visual("licensed-kpi-inactive", "Inactive Licensed Users", "KPI",
+                         {"values": [{"field": "user_name", "agg": "DISTINCT_COUNT"}]}),
+            _make_visual("licensed-inactive-table", "Inactive Licensed Users", "TABLE",
+                         {"category": "user_name",
+                          "extra_dimensions": ["role", "last_activity_timestamp", "inactivity_period"],
+                          "values": [],
+                          "sort_desc": "inactivity_period"}),
         ],
     },
 ]
@@ -708,6 +802,17 @@ def _build_measure(prefix, ds_suffix, spec):
     fid = _build_field_id(prefix, ds_suffix, field) + f"-{agg.lower()}"
     col = {"DataSetIdentifier": ds_suffix, "ColumnName": field}
 
+    if agg == "NONE":
+        # Already-aggregated calculated field (e.g. a ratio of two
+        # aggregates) -- QuickSight rejects stacking another
+        # AggregationFunction on top of an aggregated calculated column.
+        return {
+            "NumericalMeasureField": {
+                "FieldId": fid,
+                "Column": col,
+            }
+        }
+
     if agg in ("COUNT", "DISTINCT_COUNT"):
         return {
             "CategoricalMeasureField": {
@@ -739,6 +844,9 @@ def _build_dimension(prefix, ds_suffix, col_name):
 
 def _build_visual_definition(prefix, ds_suffix, visual):
     """Convert simplified visual spec into a Quick Sight visual definition."""
+    # A visual may override the sheet's own dataset via visual["dataset"],
+    # e.g. to source from a different DATASET_CONFIGS entry than its sheet.
+    ds_suffix = visual.get("dataset") or ds_suffix
     vid = f"{prefix}-{visual['visual_id']}"
     fw = visual["field_wells"]
     vtype = visual["type"]
@@ -832,6 +940,13 @@ def _build_visual_definition(prefix, ds_suffix, visual):
         value_labels = _axis_labels_for_measures(fw["values"])
         if value_labels:
             chart_config["PrimaryYAxisLabelOptions"] = value_labels
+        missing_data_treatment = visual.get("missing_data_treatment")
+        if missing_data_treatment:
+            chart_config["PrimaryYAxisDisplayOptions"] = {
+                "MissingDataConfigurations": [
+                    {"TreatmentOption": missing_data_treatment}
+                ]
+            }
         result = {
             "LineChartVisual": {
                 "VisualId": vid,
@@ -1222,8 +1337,16 @@ class QuickSightStack(Stack):
         # ── 3. Analysis ──────────────────────────────────────────────────
         analysis_id = f"{prefix}-observability-analysis"
 
-        # Dataset identifier declarations — only datasets used in sheets
+        # Dataset identifier declarations — datasets used as a sheet's own
+        # dataset, plus any dataset a visual overrides via visual["dataset"]
+        # (e.g. "function-usage-distribution", which is never a sheet's own
+        # dataset — only referenced per-visual).
         used_datasets = {sd["dataset"] for sd in SHEET_DEFS}
+        for sd in SHEET_DEFS:
+            for v in sd["visuals"]:
+                override = v.get("dataset")
+                if override:
+                    used_datasets.add(override)
         ds_id_map = {
             cfg["id_suffix"]: f"{prefix}-{cfg['id_suffix']}"
             for cfg in DATASET_CONFIGS
@@ -1240,8 +1363,31 @@ class QuickSightStack(Stack):
         # Build sheets with grid layout
         sheets = []
 
-        # No calculated fields needed for current sheets
-        calculated_fields = []
+        # These are analysis-level (standalone) CalculatedFields, so they must
+        # use plain aggregate functions only. LAC-W / "Over" functions (e.g.
+        # distinctCountOver, sumOver) are only valid inside a visual's own
+        # table-calculation context and are rejected here by QuickSight with
+        # CONTEXTUAL_UNSUPPORTED_FUNCTION. The denominator instead uses a
+        # plain distinct_count of truncated dates to count distinct calendar
+        # days, which is fully supported at the analysis level.
+        calculated_fields = [
+            {
+                "DataSetIdentifier": "chat-activity",
+                "Name": "daily_avg_usage_volume",
+                "Expression": (
+                    "distinct_count({conversation_id}) / "
+                    "distinct_count(truncDate('DD', {event_time}))"
+                ),
+            },
+            {
+                "DataSetIdentifier": "agent-hours-usage",
+                "Name": "daily_avg_agent_hours",
+                "Expression": (
+                    "sum({hours}) / "
+                    "distinct_count(truncDate('DD', {event_time}))"
+                ),
+            },
+        ]
 
         for sheet_def in SHEET_DEFS:
             sheet_id = f"{prefix}-sheet-{sheet_def['id_suffix']}"
@@ -1333,11 +1479,27 @@ class QuickSightStack(Stack):
                     },
                 }
             },
+            {
+                "IntegerParameterDeclaration": {
+                    "Name": "InactivityThresholdDays",
+                    "ParameterValueType": "SINGLE_VALUED",
+                    "DefaultValues": {
+                        "StaticValues": [30],
+                    },
+                }
+            },
         ]
 
         # ── Filter groups: one per sheet, scoped to that sheet's dataset ──
+        # The "licensed-users" sheet's dataset has no event_time column (its
+        # schema is keyed on inactivity_period, not a generic time range) so
+        # it is excluded from this generic date-range TimeRangeFilter loop.
+        # It gets its own NumericRangeFilter/InactivityThresholdDays wiring
+        # below instead.
         filter_groups = []
         for sheet_def in SHEET_DEFS:
+            if sheet_def["id_suffix"] == "licensed-users":
+                continue
             sheet_id = f"{prefix}-sheet-{sheet_def['id_suffix']}"
             ds_suffix = sheet_def["dataset"]
             fg_id = f"{prefix}-fg-{sheet_def['id_suffix']}"
@@ -1370,6 +1532,86 @@ class QuickSightStack(Stack):
                 "CrossDataset": "SINGLE_DATASET",
                 "Status": "ENABLED",
             })
+
+            # A sheet may host visuals sourced from datasets other than its
+            # own (via a per-visual "dataset" override, e.g.
+            # "function-usage-distribution" on the "adoption" sheet). Each
+            # such extra dataset needs its own date-range filter group,
+            # scoped to the same sheet, alongside the sheet's own.
+            extra_datasets = sorted({
+                v["dataset"] for v in sheet_def["visuals"]
+                if v.get("dataset") and v["dataset"] != ds_suffix
+            })
+            for extra_ds_suffix in extra_datasets:
+                extra_fg_id = f"{prefix}-fg-{sheet_def['id_suffix']}-{extra_ds_suffix}"
+                extra_filter_id = f"{prefix}-filter-date-{sheet_def['id_suffix']}-{extra_ds_suffix}"
+
+                filter_groups.append({
+                    "FilterGroupId": extra_fg_id,
+                    "Filters": [{
+                        "TimeRangeFilter": {
+                            "FilterId": extra_filter_id,
+                            "Column": {
+                                "DataSetIdentifier": extra_ds_suffix,
+                                "ColumnName": "event_time",
+                            },
+                            "RangeMinimumValue": {"Parameter": "StartDate"},
+                            "RangeMaximumValue": {"Parameter": "EndDate"},
+                            "NullOption": "ALL_VALUES",
+                            "IncludeMinimum": True,
+                            "IncludeMaximum": True,
+                        }
+                    }],
+                    "ScopeConfiguration": {
+                        "SelectedSheets": {
+                            "SheetVisualScopingConfigurations": [{
+                                "SheetId": sheet_id,
+                                "Scope": "ALL_VISUALS",
+                            }]
+                        }
+                    },
+                    "CrossDataset": "SINGLE_DATASET",
+                    "Status": "ENABLED",
+                })
+
+        # ── Licensed Users sheet: inactivity threshold filter ────────────
+        # NumericRangeFilter on licensed_users_activity.inactivity_period,
+        # bound to the InactivityThresholdDays parameter with
+        # greater-than-or-equal-to semantics (IncludeMinimum=True). Scoped to
+        # only the two visuals that should reflect the inactivity threshold
+        # (the inactive-users KPI and table) — NOT the total-licensed-users
+        # KPI, which must always show the true total regardless of
+        # inactivity.
+        licensed_users_sheet_id = f"{prefix}-sheet-licensed-users"
+        filter_groups.append({
+            "FilterGroupId": f"{prefix}-fg-licensed-users-threshold",
+            "Filters": [{
+                "NumericRangeFilter": {
+                    "FilterId": f"{prefix}-filter-licensed-users-threshold",
+                    "Column": {
+                        "DataSetIdentifier": "licensed-users",
+                        "ColumnName": "inactivity_period",
+                    },
+                    "RangeMinimum": {"Parameter": "InactivityThresholdDays"},
+                    "IncludeMinimum": True,
+                    "NullOption": "ALL_VALUES",
+                }
+            }],
+            "ScopeConfiguration": {
+                "SelectedSheets": {
+                    "SheetVisualScopingConfigurations": [{
+                        "SheetId": licensed_users_sheet_id,
+                        "Scope": "SELECTED_VISUALS",
+                        "VisualIds": [
+                            f"{prefix}-licensed-kpi-inactive",
+                            f"{prefix}-licensed-inactive-table",
+                        ],
+                    }]
+                }
+            },
+            "CrossDataset": "SINGLE_DATASET",
+            "Status": "ENABLED",
+        })
 
         # ── Add ParameterControls to each sheet ──────────────────────────
         for i, sheet_def in enumerate(SHEET_DEFS):
@@ -1415,22 +1657,40 @@ class QuickSightStack(Stack):
                     "Status": "ENABLED",
                 })
 
-            sheets[i]["ParameterControls"] = [
-                {
-                    "DateTimePicker": {
-                        "ParameterControlId": f"{prefix}-ctrl-start-{suffix}",
-                        "SourceParameterName": "StartDate",
-                        "Title": "Start Date",
-                    }
-                },
-                {
-                    "DateTimePicker": {
-                        "ParameterControlId": f"{prefix}-ctrl-end-{suffix}",
-                        "SourceParameterName": "EndDate",
-                        "Title": "End Date",
-                    }
-                },
-            ]
+            if suffix == "licensed-users":
+                # This sheet's dataset has no event_time column, so the
+                # generic StartDate/EndDate DateTimePicker controls don't
+                # apply here. It gets its own InactivityThresholdDays
+                # slider control instead.
+                sheets[i]["ParameterControls"] = [
+                    {
+                        "Slider": {
+                            "ParameterControlId": f"{prefix}-ctrl-threshold-{suffix}",
+                            "SourceParameterName": "InactivityThresholdDays",
+                            "Title": "Inactivity Threshold (days)",
+                            "MinimumValue": 0,
+                            "MaximumValue": 365,
+                            "StepSize": 1,
+                        }
+                    },
+                ]
+            else:
+                sheets[i]["ParameterControls"] = [
+                    {
+                        "DateTimePicker": {
+                            "ParameterControlId": f"{prefix}-ctrl-start-{suffix}",
+                            "SourceParameterName": "StartDate",
+                            "Title": "Start Date",
+                        }
+                    },
+                    {
+                        "DateTimePicker": {
+                            "ParameterControlId": f"{prefix}-ctrl-end-{suffix}",
+                            "SourceParameterName": "EndDate",
+                            "Title": "End Date",
+                        }
+                    },
+                ]
 
         definition = {
             "DataSetIdentifierDeclarations": dataset_identifiers,
@@ -1464,6 +1724,14 @@ class QuickSightStack(Stack):
         # ── 5. Dashboard ─────────────────────────────────────────────────
         dashboard_id = f"{prefix}-observability-dashboard"
 
+        # Grant "Everyone in this account" link-sharing access by default,
+        # so every registered Quick Sight user in the default namespace can
+        # view the dashboard without needing individual/manual sharing.
+        # This mirrors the read-only actions AWS documents for the
+        # UpdateDashboardPermissions --grant-link-permissions CLI flow:
+        # https://docs.aws.amazon.com/quick/latest/userguide/share-a-dashboard-grant-access-everyone-api.html
+        default_namespace_arn = f"arn:aws:quicksight:{region}:{account_id}:namespace/default"
+
         dashboard = qs.CfnDashboard(
             self, "ObservabilityDashboard",
             aws_account_id=account_id,
@@ -1476,6 +1744,18 @@ class QuickSightStack(Stack):
                     actions=OWNER_ACTIONS["dashboard"],
                 )
             ],
+            link_sharing_configuration=qs.CfnDashboard.LinkSharingConfigurationProperty(
+                permissions=[
+                    qs.CfnDashboard.ResourcePermissionProperty(
+                        principal=default_namespace_arn,
+                        actions=[
+                            "quicksight:DescribeDashboard",
+                            "quicksight:QueryDashboard",
+                            "quicksight:ListDashboardVersions",
+                        ],
+                    )
+                ],
+            ),
         )
         # Dashboard uses the same Definition as the analysis
         dashboard.add_property_override("Definition", definition)

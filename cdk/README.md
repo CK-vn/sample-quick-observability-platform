@@ -8,7 +8,7 @@ The CDK app defines three stacks, deployed incrementally by `deploy.py`:
 
 | Stack | Created by | Resources |
 |-------|-----------|-----------|
-| **LogsStack** (`{prefix}-logs`) | `deploy.py --logs` | Customer-managed KMS key (auto-rotation), CloudWatch Log Groups with data protection policies, vended logs delivery configuration |
+| **LogsStack** (`{prefix}-logs`) | `deploy.py --logs` | Customer-managed KMS key (auto-rotation), CloudWatch Log Groups, vended logs delivery configuration |
 | **PipelineStack** (`{prefix}-pipeline`) | `deploy.py --pipeline` | S3 data lake bucket, Lambda transform functions, Firehose delivery streams, EventBridge rule, CloudWatch Logs subscription filters |
 | **QuickSightStack** (`{prefix}-quicksight`) | `deploy.py --dashboard` | Custom theme, Athena data source, SPICE datasets with daily refresh, analysis, dashboard |
 

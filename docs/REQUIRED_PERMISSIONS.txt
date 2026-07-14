@@ -62,7 +62,6 @@ logs delivery configuration that connects Amazon Quick to those log groups.
     GetKeyRotationStatus, PutKeyPolicy, GetKeyPolicy, ScheduleKeyDeletion,
     TagResource
   - logs:CreateLogGroup, DeleteLogGroup, DescribeLogGroups, TagResource,
-    PutDataProtectionPolicy, GetDataProtectionPolicy,
     AssociateKmsKey, DisassociateKmsKey
   - logs:PutDeliverySource, GetDeliverySource, DeleteDeliverySource,
     PutDeliveryDestination, GetDeliveryDestination, DeleteDeliveryDestination,
@@ -78,8 +77,11 @@ logs delivery configuration that connects Amazon Quick to those log groups.
 3. STEP 2 — Data pipeline (deploy.py --pipeline)
 --------------------------------------------------------------------------------
 
-Creates: an S3 data lake bucket, 2 Lambda transform functions, 5 Firehose
-delivery streams, an EventBridge rule for CloudTrail events, IAM roles for
+Creates: an S3 data lake bucket, 3 Lambda functions (2 Firehose transform
+functions plus the scheduled Licensed_Users_Snapshot_Lambda), 5 Firehose
+delivery streams, 2 EventBridge rules (the CloudTrail events rule and the
+new daily Licensed Users Snapshot schedule that invokes
+Licensed_Users_Snapshot_Lambda), IAM roles for
 Lambda/Firehose/CloudWatch Logs/EventBridge, and CloudWatch Logs subscription
 filters connecting Step 1's log groups to Firehose.
 
@@ -115,12 +117,32 @@ CDK code (cdk/pipeline_stack.py) already grants this; flagged here in case
 your organization further restricts IAM policy content beyond what CDK
 generates.
 
+NOTE ON THE LICENSED USERS SNAPSHOT LAMBDA'S OWN PERMISSIONS — DEPLOY-TIME
+vs. RUNTIME:
+The list above is what the DEPLOYING identity needs to CREATE the pipeline
+resources (the iam:CreateRole/PutRolePolicy/etc. actions already cover
+creating a new IAM role and attaching a new policy, whatever its content).
+It is a separate concern from what the Licensed_Users_Snapshot_Lambda's OWN
+execution role is allowed to do once running. cdk/pipeline_stack.py already
+creates a dedicated least-privilege role for this Lambda (separate from the
+shared Firehose-transform Lambda role) granting only:
+  - quicksight:ListUsers (Resource: "*" — QuickSight ListUsers has no
+    resource-level ARN to scope to)
+  - s3:PutObject scoped to
+    arn:aws:s3:::<data-lake-bucket>/licensed-users-snapshot/*
+  - kms:Encrypt, kms:GenerateDataKey on the Step-1 KMS key
+No changes are needed in this document's Action lists for that role — it is
+a RUNTIME grant defined inline in the CDK app, not something the deploying
+identity's own IAM policy needs to enumerate.
+
 --------------------------------------------------------------------------------
 4. STEP 3 — Data catalog (scripts/setup_datacatalog.py via deploy.py --datacatalog)
 --------------------------------------------------------------------------------
 
-Creates: a Glue database, 5 Athena tables, and 6 Athena views over the S3
-data lake.
+Creates: a Glue database, 6 Athena tables, and 8 Athena views over the S3
+data lake (including the licensed_users_snapshot table and the
+licensed_users_activity / function_usage_distribution views added for the
+Licensed Users pipeline and dashboard sheet).
 
   - glue:CreateDatabase, GetDatabase, DeleteDatabase, CreateTable, GetTable,
     GetTables, UpdateTable, DeleteTable, BatchCreatePartition
@@ -158,8 +180,11 @@ ACCESS CONTROL MODE — choose ONE:
 5. STEP 4 — Quick Sight dashboard (deploy.py --dashboard)
 --------------------------------------------------------------------------------
 
-Creates: a custom Quick Sight theme, an Athena data source, 5 SPICE datasets
-with daily refresh schedules, an analysis, and a dashboard.
+Creates: a custom Quick Sight theme, an Athena data source, 7 SPICE datasets
+(chat-activity, feedback-analysis, agent-hours-usage, api-audit-trail,
+index-usage, licensed-users, function-usage-distribution) with daily refresh
+schedules, an analysis, and a dashboard — including the new "Licensed Users"
+sheet listing licensed users inactive beyond a configurable threshold.
 
   - quicksight:CreateTheme, DescribeTheme, UpdateTheme, DeleteTheme,
     UpdateThemePermissions, DescribeThemePermissions, CreateThemeAlias,

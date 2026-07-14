@@ -115,8 +115,6 @@ Statement:
       - logs:DeleteLogGroup
       - logs:DescribeLogGroups
       - logs:TagResource
-      - logs:PutDataProtectionPolicy
-      - logs:GetDataProtectionPolicy
       - logs:AssociateKmsKey
       - logs:DisassociateKmsKey
       - logs:PutDeliverySource
@@ -149,7 +147,12 @@ Statement:
     Effect: Allow
     Action:
       # Read-only; used to auto-detect the Amazon Quick subscription region,
-      # edition, and available Quick Sight users.
+      # edition, and available Quick Sight users. quicksight:ListUsers here
+      # is for the DEPLOYER identity (auto-detection at deploy time) and is
+      # already present — it is separate from the RUNTIME
+      # quicksight:ListUsers permission granted to the
+      # Licensed_Users_Snapshot_Lambda's own dedicated execution role (see
+      # cdk/pipeline_stack.py), which is not part of this deploy-time policy.
       - quicksight:ListNamespaces
       - quicksight:DescribeAccountSubscription
       - quicksight:ListUsers
@@ -158,6 +161,15 @@ Statement:
 
   # ---------------------------------------------------------------------------
   # Step 2 — Data pipeline (S3 data lake, Lambda, Firehose, EventBridge)
+  #
+  # Creates: an S3 data lake bucket, 3 Lambda functions (2 Firehose transform
+  # functions plus the scheduled Licensed_Users_Snapshot_Lambda), 5 Firehose
+  # delivery streams, 2 EventBridge rules (the CloudTrail events rule and the
+  # daily Licensed Users Snapshot schedule), IAM roles for
+  # Lambda/Firehose/CloudWatch Logs/EventBridge, and CloudWatch Logs
+  # subscription filters. All statements below use Resource: "*" (see caveat
+  # 1 above), so they already cover creating the additional Lambda function
+  # and EventBridge rule without any new Action entries.
   # ---------------------------------------------------------------------------
   - Sid: S3DataLakeAndResultsBuckets
     Effect: Allow
@@ -218,6 +230,11 @@ Statement:
   - Sid: IamRolesForPipelineServices
     Effect: Allow
     Action:
+      # Covers creating every pipeline IAM role, including the dedicated
+      # least-privilege role for Licensed_Users_Snapshot_Lambda (its
+      # runtime quicksight:ListUsers, scoped s3:PutObject on
+      # licensed-users-snapshot/*, and KMS actions are defined inline on
+      # that role by cdk/pipeline_stack.py, not by this deploy-time policy).
       - iam:CreateRole
       - iam:DeleteRole
       - iam:GetRole

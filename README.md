@@ -26,7 +26,7 @@ Amazon Quick generates operational data across Amazon CloudWatch and AWS CloudTr
 | [CloudWatch Logs](https://docs.aws.amazon.com/quick/latest/userguide/monitoring-quicksuite-chat-feedback-cloudwatch.html) | Chat conversations, user feedback (thumbs up/down with reasons), agent hours consumption, index storage usage per source | Vended logs delivery → CloudWatch Log Groups → Subscription Filters → Firehose (Lambda transform) → S3 |
 | [CloudTrail](https://docs.aws.amazon.com/quick/latest/userguide/incident-response-logging-and-monitoring-qs.html) | API calls and service events (dashboard views, user management, CRUD operations), user identity, source IP | EventBridge rule (filters `aws.quicksight` API calls and service events) → Firehose (Lambda transform) → S3 |
 
-All data is encrypted at rest with a customer-managed KMS key (auto-rotation enabled) and in transit over HTTPS. A KMS key policy grants each service principal only the specific KMS actions it needs. CloudWatch Logs data protection policies on all four log groups (chat, feedback, agent hours, and index usage) use all available managed data identifiers to detect and mask sensitive data including credentials, financial information, PII, PHI, and device identifiers. Every IAM role is scoped to the minimum permissions required, and all CDK stacks pass [cdk-nag AWS Solutions](https://github.com/cdklabs/cdk-nag) checks with zero non-compliant findings.
+All data is encrypted at rest with a customer-managed KMS key (auto-rotation enabled) and in transit over HTTPS. A KMS key policy grants each service principal only the specific KMS actions it needs. Every IAM role is scoped to the minimum permissions required, and all CDK stacks pass [cdk-nag AWS Solutions](https://github.com/cdklabs/cdk-nag) checks with zero non-compliant findings.
 
 ## Security
 
@@ -40,7 +40,6 @@ This solution applies defense-in-depth across encryption, access control, data p
 
 - **Encryption at rest** — All data is encrypted with a customer-managed KMS key (`enable_key_rotation=True`). The same key encrypts CloudWatch Log Groups, S3 objects (with S3 Bucket Key), Firehose delivery streams, and Lambda environment variables.
 - **Encryption in transit** — The S3 data lake bucket enforces HTTPS-only access (`enforce_ssl=True`).
-- **PII masking** — CloudWatch Logs [data protection policies](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html) on all four log groups (chat, feedback, agent hours, and index usage) use all available managed data identifiers to detect and mask sensitive data including credentials (e.g. AWS secret keys, private keys), financial information (e.g. credit card numbers, bank account numbers), PII (e.g. driver's licenses, social security numbers, passport numbers, email addresses, phone numbers), PHI (e.g. health insurance numbers, Medicare beneficiary numbers), and device identifiers (e.g. IP addresses).
 - **Sensitive content control** — Chat message content (`user_message`, `system_text_message`) may contain sensitive or regulated data from connected enterprise sources. Before enabling message content logging, review your organization's data privacy, compliance, and data retention policies. By default, Quick omits these fields from the CloudWatch log events entirely. When message content logging is enabled, Lake Formation column-level exclusion prevents the Quick Sight service role from accessing these columns, while the deploying admin retains full access for Athena queries. This is configurable at deployment time.
 - **Least-privilege IAM** — Each IAM role is scoped to the minimum permissions required. The Firehose role can only write to specific S3 prefixes (`cloudwatch-logs/*`, `cloudtrail/*`, `errors/*`). Lambda has no S3 access — Firehose writes to S3, not Lambda. The KMS key policy grants each service principal only the specific KMS actions it needs.
 - **S3 hardening** — The data lake bucket enables versioning, blocks all public access (`BlockPublicAccess.BLOCK_ALL`), and enforces SSL.
@@ -55,7 +54,7 @@ This solution applies defense-in-depth across encryption, access control, data p
 ![Architecture Diagram](docs/sample-quick-observability-platform.png)
 
 The solution deploys three CDK stacks, two script-based steps, and one manual console step:
-- **LogsStack** (`{prefix}-logs`): KMS key, CloudWatch Log Groups with data protection policies, vended logs delivery configuration
+- **LogsStack** (`{prefix}-logs`): KMS key, CloudWatch Log Groups, vended logs delivery configuration
 - **PipelineStack** (`{prefix}-pipeline`): S3 data lake, Firehose delivery streams, Lambda transform functions, EventBridge rule, CloudWatch Logs subscription filters
 - **QuickSightStack** (`{prefix}-quicksight`): Custom theme, Athena data source, SPICE datasets with daily refresh, analysis, and dashboard
 
@@ -91,7 +90,7 @@ This solution was developed and tested on macOS and Linux. To deploy from Window
 
 ### IAM permissions
 
-The deploying identity needs permissions to create and manage the following AWS resources: a customer-managed KMS key with key policies and aliases, CloudWatch Log Groups with data protection policies and vended logs delivery configuration, an S3 bucket with encryption and bucket policies, Lambda functions with IAM execution roles, Amazon Data Firehose delivery streams, EventBridge rules, CloudWatch Logs subscription filters, and IAM roles with scoped policies for each service. The identity also needs permission to deploy and destroy CloudFormation stacks (used by CDK), assume CDK bootstrap roles, and call `sts:GetCallerIdentity` for account and region detection.
+The deploying identity needs permissions to create and manage the following AWS resources: a customer-managed KMS key with key policies and aliases, CloudWatch Log Groups with vended logs delivery configuration, an S3 bucket with encryption and bucket policies, Lambda functions with IAM execution roles, Amazon Data Firehose delivery streams, EventBridge rules, CloudWatch Logs subscription filters, and IAM roles with scoped policies for each service. The identity also needs permission to deploy and destroy CloudFormation stacks (used by CDK), assume CDK bootstrap roles, and call `sts:GetCallerIdentity` for account and region detection.
 
 For Amazon Quick specifically, the identity needs `quicksight:AllowVendedLogDeliveryForResource` ([docs](https://docs.aws.amazon.com/quick/latest/userguide/monitoring-quicksuite-chat-feedback-cloudwatch.html)) to enable vended logs delivery, and read access to list namespaces, describe the account subscription, and list users. Step 4 (dashboards) additionally requires permissions to create and manage Quick Sight data sources, datasets, analyses, and dashboards.
 
@@ -119,7 +118,6 @@ python3 deploy.py --logs
 Provisions (via CDK — LogsStack):
 - Customer-managed KMS key with automatic rotation and key alias (`alias/{prefix}-observability`)
 - CloudWatch Log Groups (chat, feedback, agent hours, index usage) — KMS encrypted
-- [Data protection policy](https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html) on all four log groups (chat, feedback, agent hours, and index usage) — uses all available managed data identifiers to detect and mask credentials, financial information, PII, PHI, and device identifiers
 - Sensitive content control — chat message content (`user_message`, `system_text_message`) may contain sensitive or regulated data from connected enterprise sources. Before enabling message content logging, review your organization's data privacy, compliance, and data retention policies. The deployment prompts whether to include this content. When excluded (default), Quick omits these fields from the CloudWatch log events entirely
 - Delivery Sources linking Amazon Quick to CloudWatch (log types: `CHAT_LOGS`, `FEEDBACK_LOGS`, `AGENT_HOURS_LOGS`, `INDEX_USAGE_LOGS`)
 - Delivery Destinations pointing to the log groups

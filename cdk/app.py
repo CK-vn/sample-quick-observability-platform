@@ -18,6 +18,9 @@ from dashboard_stack import QuickSightStack
 
 app = cdk.App()
 
+# Cost-allocation tag applied to every taggable resource across all stacks
+cdk.Tags.of(app).add("project", "quick-observability")
+
 account = os.environ.get("CDK_DEFAULT_ACCOUNT")
 region = os.environ.get("CDK_DEFAULT_REGION", "us-east-1")
 env = cdk.Environment(account=account, region=region)

@@ -365,9 +365,6 @@ def main():
         print("   N (default): These two fields will not be logged.")
         print()
         print("   Y: These fields will be logged to CloudWatch and the S3 data lake.")
-        print("      A data protection policy masks common PII patterns (emails,")
-        print("      credit cards, SSNs, US phone numbers, IP addresses) but cannot")
-        print("      mask free-text business data.")
         print()
         include_msg = input("  Include chat message content in logs? (y/N): ").strip().lower()
         include_message_content = include_msg == "y"

@@ -96,12 +96,10 @@ logs:DescribeDeliveries
 logs:DescribeLogGroups
 logs:DescribeSubscriptionFilters
 logs:DisassociateKmsKey
-logs:GetDataProtectionPolicy
 logs:GetDelivery
 logs:GetDeliveryDestination
 logs:GetDeliveryDestinationPolicy
 logs:GetDeliverySource
-logs:PutDataProtectionPolicy
 logs:PutDeliveryDestination
 logs:PutDeliveryDestinationPolicy
 logs:PutDeliverySource

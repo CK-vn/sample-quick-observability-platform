@@ -108,131 +108,11 @@ class LogsStack(Stack):
         # CloudWatch Log Groups
         # ====================================================================
 
-        # Data protection policy for chat logs — masks sensitive data patterns
-        # (PII, credentials, financial, PHI, device identifiers) at the
-        # CloudWatch layer using all available managed data identifiers.
-        # This is defense-in-depth: the Lambda transform also strips message
-        # content before it reaches S3.
-        all_data_identifiers = [
-            # Credentials
-            logs.DataIdentifier.AWSSECRETKEY,
-            logs.DataIdentifier.OPENSSHPRIVATEKEY,
-            logs.DataIdentifier.PGPPRIVATEKEY,
-            logs.DataIdentifier.PKCSPRIVATEKEY,
-            logs.DataIdentifier.PUTTYPRIVATEKEY,
-            # Financial
-            logs.DataIdentifier.BANKACCOUNTNUMBER_DE,
-            logs.DataIdentifier.BANKACCOUNTNUMBER_ES,
-            logs.DataIdentifier.BANKACCOUNTNUMBER_FR,
-            logs.DataIdentifier.BANKACCOUNTNUMBER_GB,
-            logs.DataIdentifier.BANKACCOUNTNUMBER_IT,
-            logs.DataIdentifier.BANKACCOUNTNUMBER_US,
-            logs.DataIdentifier.CREDITCARDEXPIRATION,
-            logs.DataIdentifier.CREDITCARDNUMBER,
-            logs.DataIdentifier.CREDITCARDSECURITYCODE,
-            # PII — General
-            logs.DataIdentifier.ADDRESS,
-            logs.DataIdentifier.EMAILADDRESS,
-            logs.DataIdentifier.LATLONG,
-            logs.DataIdentifier.NAME,
-            logs.DataIdentifier.VEHICLEIDENTIFICATIONNUMBER,
-            # PII — National / Government IDs
-            logs.DataIdentifier.CEPCODE_BR,
-            logs.DataIdentifier.CNPJ_BR,
-            logs.DataIdentifier.CPFCODE_BR,
-            logs.DataIdentifier.DRIVERSLICENSE_AT,
-            logs.DataIdentifier.DRIVERSLICENSE_AU,
-            logs.DataIdentifier.DRIVERSLICENSE_BE,
-            logs.DataIdentifier.DRIVERSLICENSE_BG,
-            logs.DataIdentifier.DRIVERSLICENSE_CA,
-            logs.DataIdentifier.DRIVERSLICENSE_CY,
-            logs.DataIdentifier.DRIVERSLICENSE_CZ,
-            logs.DataIdentifier.DRIVERSLICENSE_DE,
-            logs.DataIdentifier.DRIVERSLICENSE_DK,
-            logs.DataIdentifier.DRIVERSLICENSE_EE,
-            logs.DataIdentifier.DRIVERSLICENSE_ES,
-            logs.DataIdentifier.DRIVERSLICENSE_FI,
-            logs.DataIdentifier.DRIVERSLICENSE_FR,
-            logs.DataIdentifier.DRIVERSLICENSE_GB,
-            logs.DataIdentifier.DRIVERSLICENSE_GR,
-            logs.DataIdentifier.DRIVERSLICENSE_HR,
-            logs.DataIdentifier.DRIVERSLICENSE_HU,
-            logs.DataIdentifier.DRIVERSLICENSE_IE,
-            logs.DataIdentifier.DRIVERSLICENSE_IT,
-            logs.DataIdentifier.DRIVERSLICENSE_LT,
-            logs.DataIdentifier.DRIVERSLICENSE_LU,
-            logs.DataIdentifier.DRIVERSLICENSE_LV,
-            logs.DataIdentifier.DRIVERSLICENSE_MT,
-            logs.DataIdentifier.DRIVERSLICENSE_NL,
-            logs.DataIdentifier.DRIVERSLICENSE_PL,
-            logs.DataIdentifier.DRIVERSLICENSE_PT,
-            logs.DataIdentifier.DRIVERSLICENSE_RO,
-            logs.DataIdentifier.DRIVERSLICENSE_SE,
-            logs.DataIdentifier.DRIVERSLICENSE_SI,
-            logs.DataIdentifier.DRIVERSLICENSE_SK,
-            logs.DataIdentifier.DRIVERSLICENSE_US,
-            logs.DataIdentifier.ELECTORALROLLNUMBER_GB,
-            logs.DataIdentifier.INDIVIDUALTAXIDENTIFICATIONNUMBER_US,
-            logs.DataIdentifier.INSEECODE_FR,
-            logs.DataIdentifier.NATIONALIDENTIFICATIONNUMBER_DE,
-            logs.DataIdentifier.NATIONALIDENTIFICATIONNUMBER_ES,
-            logs.DataIdentifier.NATIONALIDENTIFICATIONNUMBER_IT,
-            logs.DataIdentifier.NATIONALINSURANCENUMBER_GB,
-            logs.DataIdentifier.NIENUMBER_ES,
-            logs.DataIdentifier.NIFNUMBER_ES,
-            logs.DataIdentifier.PASSPORTNUMBER_CA,
-            logs.DataIdentifier.PASSPORTNUMBER_DE,
-            logs.DataIdentifier.PASSPORTNUMBER_ES,
-            logs.DataIdentifier.PASSPORTNUMBER_FR,
-            logs.DataIdentifier.PASSPORTNUMBER_GB,
-            logs.DataIdentifier.PASSPORTNUMBER_IT,
-            logs.DataIdentifier.PASSPORTNUMBER_US,
-            logs.DataIdentifier.PERMANENTRESIDENCENUMBER_CA,
-            logs.DataIdentifier.RGNUMBER_BR,
-            logs.DataIdentifier.SSN_ES,
-            logs.DataIdentifier.SSN_US,
-            logs.DataIdentifier.TAXID_DE,
-            logs.DataIdentifier.TAXID_ES,
-            logs.DataIdentifier.TAXID_FR,
-            logs.DataIdentifier.TAXID_GB,
-            # PII — Phone numbers
-            logs.DataIdentifier.PHONENUMBER_BR,
-            logs.DataIdentifier.PHONENUMBER_DE,
-            logs.DataIdentifier.PHONENUMBER_ES,
-            logs.DataIdentifier.PHONENUMBER_FR,
-            logs.DataIdentifier.PHONENUMBER_GB,
-            logs.DataIdentifier.PHONENUMBER_IT,
-            logs.DataIdentifier.PHONENUMBER_US,
-            # PII — Postal codes
-            logs.DataIdentifier.POSTALCODE_CA,
-            logs.DataIdentifier.ZIPCODE_US,
-            # PHI — Protected Health Information
-            logs.DataIdentifier.DRUGENFORCEMENTAGENCYNUMBER_US,
-            logs.DataIdentifier.HEALTHCAREPROCEDURECODE_US,
-            logs.DataIdentifier.HEALTHINSURANCECARDNUMBER_EU,
-            logs.DataIdentifier.HEALTHINSURANCECLAIMNUMBER_US,
-            logs.DataIdentifier.HEALTHINSURANCENUMBER_FR,
-            logs.DataIdentifier.MEDICAREBENEFICIARYNUMBER_US,
-            logs.DataIdentifier.NATIONALDRUGCODE_US,
-            logs.DataIdentifier.NATIONALPROVIDERID_US,
-            logs.DataIdentifier.NHSNUMBER_GB,
-            logs.DataIdentifier.PERSONALHEALTHNUMBER_CA,
-            # Device identifiers
-            logs.DataIdentifier.IPADDRESS,
-        ]
-
-        chat_data_protection = logs.DataProtectionPolicy(
-            name="chat-logs-data-protection",
-            description="Mask sensitive data in Quick chat logs",
-            identifiers=all_data_identifiers,
-        )
-
         self.chat_log_group = logs.LogGroup(
             self, "ChatLogGroup",
             log_group_name=chat_logs_group_name,
             encryption_key=self.kms_key,
             removal_policy=RemovalPolicy.DESTROY,
-            data_protection_policy=chat_data_protection,
         )
 
         self.feedback_log_group = logs.LogGroup(
@@ -240,11 +120,6 @@ class LogsStack(Stack):
             log_group_name=feedback_logs_group_name,
             encryption_key=self.kms_key,
             removal_policy=RemovalPolicy.DESTROY,
-            data_protection_policy=logs.DataProtectionPolicy(
-                name="feedback-logs-data-protection",
-                description="Mask sensitive data in Quick feedback logs",
-                identifiers=all_data_identifiers,
-            ),
         )
 
         self.agent_hours_log_group = logs.LogGroup(
@@ -252,11 +127,6 @@ class LogsStack(Stack):
             log_group_name=agent_hours_logs_group_name,
             encryption_key=self.kms_key,
             removal_policy=RemovalPolicy.DESTROY,
-            data_protection_policy=logs.DataProtectionPolicy(
-                name="agent-hours-logs-data-protection",
-                description="Mask sensitive data in Quick agent hours logs",
-                identifiers=all_data_identifiers,
-            ),
         )
 
         self.index_usage_log_group = logs.LogGroup(
@@ -264,11 +134,6 @@ class LogsStack(Stack):
             log_group_name=index_usage_logs_group_name,
             encryption_key=self.kms_key,
             removal_policy=RemovalPolicy.DESTROY,
-            data_protection_policy=logs.DataProtectionPolicy(
-                name="index-usage-logs-data-protection",
-                description="Mask sensitive data in Quick index usage logs",
-                identifiers=all_data_identifiers,
-            ),
         )
 
         # ====================================================================

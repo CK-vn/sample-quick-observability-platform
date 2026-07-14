@@ -287,6 +287,144 @@ class PipelineStack(Stack):
             ]
         )
 
+        # ====================================================================
+        # Licensed Users Snapshot Lambda (dedicated least-privilege role)
+        # ====================================================================
+
+        # Dedicated IAM role for the Licensed Users Snapshot Lambda - separate
+        # from lambda_role since this function needs a distinct, narrower set
+        # of permissions (QuickSight ListUsers + scoped S3 write) rather than
+        # the Firehose-transform Lambdas' permission set.
+        licensed_users_snapshot_role = iam.Role(
+            self,
+            "LicensedUsersSnapshotRole",
+            role_name=f"{stack_name}-LicensedUsersSnapshot-{region}",
+            assumed_by=iam.ServicePrincipal("lambda.amazonaws.com"),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "service-role/AWSLambdaBasicExecutionRole"
+                )
+            ]
+        )
+
+        # Suppress AwsSolutions-IAM4 for AWSLambdaBasicExecutionRole
+        NagSuppressions.add_resource_suppressions(
+            licensed_users_snapshot_role,
+            [
+                {
+                    "id": "AwsSolutions-IAM4",
+                    "reason": "AWSLambdaBasicExecutionRole is AWS managed policy required for Lambda to write CloudWatch Logs. This is a standard and recommended practice."
+                }
+            ]
+        )
+
+        # QuickSight ListUsers does not support resource-level ARNs, so this
+        # must be scoped to Resource: "*" -- this is the only action granted
+        # against QuickSight.
+        licensed_users_snapshot_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=["quicksight:ListUsers"],
+                resources=["*"]
+            )
+        )
+
+        # S3 write access scoped to only the licensed-users-snapshot/ prefix
+        licensed_users_snapshot_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=["s3:PutObject"],
+                resources=[
+                    f"{self.data_lake_bucket.bucket_arn}/licensed-users-snapshot/*"
+                ]
+            )
+        )
+
+        # KMS permissions to encrypt the snapshot written to S3
+        licensed_users_snapshot_role.add_to_policy(
+            iam.PolicyStatement(
+                effect=iam.Effect.ALLOW,
+                actions=[
+                    "kms:Encrypt",
+                    "kms:GenerateDataKey"
+                ],
+                resources=[self.data_lake_key.key_arn]
+            )
+        )
+
+        # Suppress AwsSolutions-IAM5 for QuickSight ListUsers wildcard and S3 prefix wildcard on the DefaultPolicy
+        NagSuppressions.add_resource_suppressions_by_path(
+            self,
+            f"/{self.stack_name}/LicensedUsersSnapshotRole/DefaultPolicy/Resource",
+            [
+                {
+                    "id": "AwsSolutions-IAM5",
+                    "reason": "quicksight:ListUsers does not support resource-level ARNs (Resource: \"*\" is required by the API). The s3:PutObject permission is scoped to the licensed-users-snapshot/* prefix only, following the same prefix-scoping pattern as FirehoseRole.",
+                    "appliesTo": [
+                        "Resource::*",
+                        "Resource::<DataLakeBucket0256EA8E.Arn>/licensed-users-snapshot/*"
+                    ]
+                }
+            ]
+        )
+
+        # Licensed Users Snapshot function
+        licensed_users_snapshot_function = lambda_.Function(
+            self,
+            "LicensedUsersSnapshotFunction",
+            function_name=f"{stack_name}-LicensedUsersSnapshot",
+            runtime=lambda_.Runtime.PYTHON_3_14,
+            handler="index.lambda_handler",
+            code=lambda_.Code.from_asset(os.path.join(lambda_base_path, "lambda/licensed_users_snapshot")),
+            role=licensed_users_snapshot_role,
+            timeout=Duration.seconds(300),
+            memory_size=512,
+            environment_encryption=self.data_lake_key,
+            environment={
+                "AWS_ACCOUNT_ID": account_id,
+                "DATA_LAKE_BUCKET": self.data_lake_bucket.bucket_name
+            }
+        )
+
+        # Suppress AwsSolutions-L1 for Lambda runtime
+        NagSuppressions.add_resource_suppressions(
+            licensed_users_snapshot_function,
+            [
+                {
+                    "id": "AwsSolutions-L1",
+                    "reason": "Lambda function uses Python 3.14 which is the latest available runtime."
+                }
+            ]
+        )
+
+        # Hourly schedule (:55 past every hour) to invoke the Licensed Users
+        # Snapshot Lambda, ~5 minutes before the SPICE datasets' hourly
+        # refresh so snapshot data is never more than ~1 hour stale.
+        licensed_users_snapshot_schedule = events.CfnRule(
+            self,
+            "LicensedUsersSnapshotScheduleCfn",
+            name=f"{stack_name}-LicensedUsersSnapshotSchedule",
+            description="Hourly schedule (at :55) to snapshot QuickSight licensed users",
+            schedule_expression="cron(55 * * * ? *)",
+            state="ENABLED",
+            targets=[
+                events.CfnRule.TargetProperty(
+                    arn=licensed_users_snapshot_function.function_arn,
+                    id="LicensedUsersSnapshotTarget"
+                )
+            ]
+        )
+
+        # Lambda targets use resource-based permissions rather than an
+        # assumed IAM role, so grant EventBridge invoke rights directly on
+        # the function, scoped to this specific rule's ARN.
+        licensed_users_snapshot_function.add_permission(
+            "AllowEventBridgeInvoke",
+            principal=iam.ServicePrincipal("events.amazonaws.com"),
+            action="lambda:InvokeFunction",
+            source_arn=licensed_users_snapshot_schedule.attr_arn
+        )
+
         # Grant Lambda invoke permission to Firehose
         log_transform_function.grant_invoke(firehose_role)
         cloudtrail_transform_function.grant_invoke(firehose_role)
@@ -573,4 +711,26 @@ class PipelineStack(Stack):
             "CloudTrailRuleName",
             value=cfn_rule.name,
             description="EventBridge rule name for CloudTrail events"
+        )
+
+        # Licensed Users Snapshot pipeline outputs
+        CfnOutput(
+            self,
+            "LicensedUsersSnapshotFunctionName",
+            value=licensed_users_snapshot_function.function_name,
+            description="Licensed Users Snapshot Lambda function name"
+        )
+
+        CfnOutput(
+            self,
+            "LicensedUsersSnapshotFunctionArn",
+            value=licensed_users_snapshot_function.function_arn,
+            description="Licensed Users Snapshot Lambda function ARN"
+        )
+
+        CfnOutput(
+            self,
+            "LicensedUsersSnapshotRuleName",
+            value=licensed_users_snapshot_schedule.name,
+            description="EventBridge rule name for the hourly Licensed Users Snapshot schedule"
         )

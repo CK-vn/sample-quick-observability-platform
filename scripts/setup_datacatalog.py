@@ -37,6 +37,7 @@ TABLES = [
     "agent_hours_logs",
     "cloudtrail_events",
     "index_usage_logs",
+    "licensed_users_snapshot",
 ]
 
 VIEWS = [
@@ -46,6 +47,8 @@ VIEWS = [
     "api_audit_trail",
     "querydatabase_events",
     "index_usage",
+    "licensed_users_activity",
+    "function_usage_distribution",
 ]
 
 

@@ -83,6 +83,7 @@ quicksuite_*.csv
 quicksuite_*.json
 quicksight_*.csv
 quicksight_*.json
+docs/quick-observability-cost-estimate.xlsx
 
 # Node modules
 node_modules/
