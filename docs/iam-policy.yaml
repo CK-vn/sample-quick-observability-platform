@@ -14,8 +14,8 @@
 #   or the AWS API/provider requires it. Replace it with approved account,
 #   Region, resource-prefix, bucket, key, role, and stack ARN patterns wherever
 #   your provisioning workflow makes those values known.
-# - In particular, scope IAM role-management and PassRole resources to the six
-#   generated roles plus `service-role/aws-quicksight-service-role-v0`.
+# - In particular, scope IAM role-management and PassRole resources to the seven
+#   generated roles.
 # - Retain the iam:PassedToService condition on PassRole.
 # - Apply SCPs, permission boundaries, session policies, and tag conditions
 #   required by your organization.
@@ -188,8 +188,8 @@ Statement:
       - events:UntagResource
     Resource: "*"
 
-  # Terraform creates six roles and manages only inline role policies,
-  # including a scoped inline policy on aws-quicksight-service-role-v0.
+  # Terraform creates seven roles and manages only inline role policies,
+  # including a scoped QuickSight Athena data-source run-as role.
   - Sid: IamRoleAndInlinePolicyLifecycle
     Effect: Allow
     Action:

@@ -2,15 +2,13 @@ locals {
   account_id = data.aws_caller_identity.current.account_id
   partition  = data.aws_partition.current.partition
 
-  database_name              = coalesce(var.database_name, replace(var.resource_prefix, "-", "_"))
-  data_lake_bucket_name      = coalesce(var.data_lake_bucket_name, "${var.resource_prefix}-datalake-${local.account_id}-${var.aws_region}")
-  athena_results_bucket_name = coalesce(var.athena_results_bucket_name, "${var.resource_prefix}-athena-${local.account_id}-${var.aws_region}")
-  pipeline_name              = "${var.resource_prefix}-pipeline"
-  quicksight_account_arn     = "arn:${local.partition}:quicksight:${var.aws_region}:${local.account_id}:account/${local.account_id}"
-  quicksight_namespace_arn   = "arn:${local.partition}:quicksight:${var.aws_region}:${local.account_id}:namespace/${var.quicksight_namespace}"
-  quicksight_service_role_arn = (
-    "arn:${local.partition}:iam::${local.account_id}:role/service-role/aws-quicksight-service-role-v0"
-  )
+  database_name               = coalesce(var.database_name, replace(var.resource_prefix, "-", "_"))
+  data_lake_bucket_name       = coalesce(var.data_lake_bucket_name, "${var.resource_prefix}-datalake-${local.account_id}-${var.aws_region}")
+  athena_results_bucket_name  = coalesce(var.athena_results_bucket_name, "${var.resource_prefix}-athena-${local.account_id}-${var.aws_region}")
+  pipeline_name               = "${var.resource_prefix}-pipeline"
+  quicksight_account_arn      = "arn:${local.partition}:quicksight:${var.aws_region}:${local.account_id}:account/${local.account_id}"
+  quicksight_namespace_arn    = "arn:${local.partition}:quicksight:${var.aws_region}:${local.account_id}:namespace/${var.quicksight_namespace}"
+  quicksight_service_role_arn = aws_iam_role.quicksight_athena.arn
 
   tags = merge(
     {

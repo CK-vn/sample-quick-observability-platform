@@ -65,9 +65,9 @@ variable "athena_results_bucket_name" {
 }
 
 variable "include_message_content" {
-  description = "Retain user_message and system_text_message in the data lake and Athena table. QuickSight datasets and topics always exclude these fields. Review data-governance requirements before enabling."
+  description = "Retain user_message and system_text_message in the data lake and Athena table. Enabled by default; set false to exclude message text. Chat Activity and Chat Session Details expose user_message; topics and Agent Hours exclude message content."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "create_quicksight_topic" {

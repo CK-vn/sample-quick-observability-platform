@@ -1,6 +1,37 @@
+# Optional: use a named shared AWS CLI profile instead of the standard
+# credential chain.
+# aws_profile = "production"
+
 aws_region              = "us-east-1"
-resource_prefix          = "quickobserve"
-quicksight_owner_arn     = "arn:aws:quicksight:us-east-1:123456789012:user/default/example-user"
-include_message_content  = false
-create_quicksight_topic  = true
-force_destroy_buckets    = false
+resource_prefix         = "quickobserve"
+quicksight_owner_arn    = "arn:aws:quicksight:us-east-1:123456789012:user/default/example-user"
+
+# Exposes user_message in the Chat Activity SPICE dataset and Chat Session
+# Details table. Set false when message text must not be collected.
+include_message_content = true
+create_quicksight_topic = true
+force_destroy_buckets   = false
+
+# Optional: override defaults when the deployment uses a non-default namespace
+# or needs names distinct from those derived from resource_prefix.
+# quicksight_namespace       = "default"
+# database_name              = "quickobserve"
+# data_lake_bucket_name      = "my-unique-data-lake-bucket"
+# athena_results_bucket_name = "my-unique-athena-results-bucket"
+
+# Optional: retain CloudWatch logs longer than the 30-day default.
+# log_retention_days = 30
+
+# Optional: override the default Amazon Quick vended-log group names.
+# log_group_names = {
+#   chat        = "/aws/vendedlogs/quick/chat"
+#   feedback    = "/aws/vendedlogs/quick/feedback"
+#   agent_hours = "/aws/vendedlogs/quick/agent-hours"
+#   index_usage = "/aws/vendedlogs/quick/index-usage"
+# }
+
+# Optional: add tags to supported resources.
+# tags = {
+#   environment = "production"
+#   owner       = "platform-team"
+# }

@@ -20,6 +20,8 @@ from botocore.exceptions import ClientError
 POLL_SECONDS = 3
 ATHENA_TIMEOUT_SECONDS = 240
 QUICKSIGHT_TIMEOUT_SECONDS = 600
+DATA_SOURCE_STABILIZATION_ATTEMPTS = 2
+IAM_PROPAGATION_RETRY_SECONDS = 15
 TABLE_MESSAGE_COLUMNS = "  user_message STRING,\n  system_text_message STRING\n"
 THEME_ACTIONS = [
     "quicksight:DescribeTheme", "quicksight:DescribeThemeAlias",
@@ -528,14 +530,17 @@ def _describe_wait(describe: Callable[[], dict[str, Any]], state_path: tuple[str
     deadline = time.monotonic() + QUICKSIGHT_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         response = describe()
-        value: Any = response
-        for key in state_path:
-            value = value.get(key, {}) if isinstance(value, dict) else {}
-        state = str(value)
+        resource: Any = response
+        for key in state_path[:-1]:
+            resource = resource.get(key, {}) if isinstance(resource, dict) else {}
+        state = str(resource.get(state_path[-1], {})) if isinstance(resource, dict) else "{}"
         if state in success:
             return response
         if state in failures or state.endswith("FAILED"):
-            raise RuntimeError(f"{label} entered state {state}")
+            error_info = resource.get("ErrorInfo", {}) if isinstance(resource, dict) else {}
+            error_type = error_info.get("Type", "UNKNOWN")
+            message = error_info.get("Message", "No failure details returned")
+            raise RuntimeError(f"{label} entered state {state}: {error_type}: {message}")
         time.sleep(POLL_SECONDS)
     raise TimeoutError(f"{label} did not stabilize before the timeout")
 
@@ -578,28 +583,45 @@ def _upsert_theme(qs: Any, account_id: str, theme_id: str, owner_arn: str) -> No
 
 
 def _upsert_data_source(qs: Any, account_id: str, source_id: str,
-                        workgroup: str, owner_arn: str) -> None:
+                        workgroup: str, role_arn: str, owner_arn: str) -> None:
     common = {
         "AwsAccountId": account_id, "DataSourceId": source_id,
         "Name": "Quick Observability - Athena",
-        "DataSourceParameters": {"AthenaParameters": {"WorkGroup": workgroup}},
+        "DataSourceParameters": {"AthenaParameters": {
+            "WorkGroup": workgroup,
+            "RoleArn": role_arn,
+        }},
         "SslProperties": {"DisableSsl": False},
     }
-    try:
-        qs.describe_data_source(AwsAccountId=account_id, DataSourceId=source_id)
-        qs.update_data_source(**common)
-    except ClientError as error:
-        if not _is_not_found(error):
-            raise
-        qs.create_data_source(
-            **common, Type="ATHENA",
-            Permissions=_permissions(owner_arn, "datasource"),
-        )
-    _describe_wait(
-        lambda: qs.describe_data_source(AwsAccountId=account_id, DataSourceId=source_id),
-        ("DataSource", "Status"), {"CREATION_SUCCESSFUL", "UPDATE_SUCCESSFUL"},
-        {"CREATION_FAILED", "UPDATE_FAILED"}, "data source",
-    )
+    for attempt in range(1, DATA_SOURCE_STABILIZATION_ATTEMPTS + 1):
+        try:
+            qs.describe_data_source(AwsAccountId=account_id, DataSourceId=source_id)
+            qs.update_data_source(**common)
+        except ClientError as error:
+            if not _is_not_found(error):
+                raise
+            qs.create_data_source(
+                **common, Type="ATHENA",
+                Permissions=_permissions(owner_arn, "datasource"),
+            )
+        try:
+            _describe_wait(
+                lambda: qs.describe_data_source(
+                    AwsAccountId=account_id, DataSourceId=source_id
+                ),
+                ("DataSource", "Status"),
+                {"CREATION_SUCCESSFUL", "UPDATE_SUCCESSFUL"},
+                {"CREATION_FAILED", "UPDATE_FAILED"}, "data source",
+            )
+            break
+        except RuntimeError as error:
+            if attempt == DATA_SOURCE_STABILIZATION_ATTEMPTS:
+                raise
+            _log(
+                f"{error}; retrying after IAM propagation "
+                f"({attempt}/{DATA_SOURCE_STABILIZATION_ATTEMPTS})"
+            )
+            time.sleep(IAM_PROPAGATION_RETRY_SECONDS)
     qs.update_data_source_permissions(
         AwsAccountId=account_id, DataSourceId=source_id,
         GrantPermissions=_permissions(owner_arn, "datasource"),
@@ -967,6 +989,7 @@ def _quicksight(props: dict[str, Any], request_type: str,
         _prop(props, "DatabaseName", "Database", default="quickobserve_db"), "database name"
     )
     workgroup = _prop(props, "WorkGroup", "Workgroup", default="primary")
+    data_source_role_arn = _prop(props, "DataSourceRoleArn", required=True)
     owner_arn = _prop(props, "OwnerArn", "QuickSightOwnerArn", required=True)
     namespace = _prop(props, "Namespace", default="default")
     include_topic = _bool(_prop(props, "CreateTopic", "EnableTopic", default=False))
@@ -1033,7 +1056,9 @@ def _quicksight(props: dict[str, Any], request_type: str,
 
     _log("QuickSight: upserting theme and Athena data source")
     _upsert_theme(qs, account_id, theme_id, owner_arn)
-    _upsert_data_source(qs, account_id, source_id, workgroup, owner_arn)
+    _upsert_data_source(
+        qs, account_id, source_id, workgroup, data_source_role_arn, owner_arn
+    )
     pending_ingestions: dict[str, str] = {}
     for config in DATASET_CONFIGS:
         _log(f"QuickSight: upserting dataset {config['id_suffix']}")

@@ -1,35 +1,33 @@
 # Deployment notes
 
-These notes capture behavior verified during an end-to-end Terraform deployment. Terraform is the only deployment path in this repository.
+Terraform is the only deployment path in this repository. It provisions the infrastructure, Athena catalog, QuickSight assets, and lifecycle bridge as one dependency graph.
 
-## Verified deployment
+## First deployment
 
-A complete deployment was validated in `us-east-1` using an isolated resource prefix, IAM-based Glue/Athena access, and message-content collection enabled. The final `terraform plan` reported no changes.
+1. Review [`iam-policy.yaml`](iam-policy.yaml) and [`REQUIRED_PERMISSIONS.txt`](REQUIRED_PERMISSIONS.txt).
+2. Copy `terraform/terraform.tfvars.example` to `terraform/terraform.tfvars`.
+3. Set the target Region, a unique `resource_prefix`, and a valid QuickSight owner ARN. Do not commit `terraform.tfvars`.
+4. Deploy:
 
-The deployment creates:
+```bash
+terraform -chdir=terraform init
+terraform -chdir=terraform plan
+terraform -chdir=terraform apply
+```
 
-- two KMS-encrypted S3 buckets and one managed Athena workgroup;
-- four Amazon Quick vended-log groups and four Lambda log groups;
-- five Firehose streams using 1 MiB / 60-second buffering;
-- four Python 3.12 Lambda functions: two transforms, the licensed-user snapshot, and the Terraform provisioner;
-- two EventBridge rules: Quick/CloudTrail routing and the hourly licensed-user snapshot at minute `55`;
-- six Glue tables and eight Athena views;
-- seven SPICE datasets with hourly full refresh schedules;
-- a six-sheet analysis/dashboard and a topic containing the five datasets with supported topic mappings.
+The stack creates two encrypted S3 buckets, an Athena workgroup, vended-log delivery, Firehose streams, Lambda functions, EventBridge rules, the Athena catalog, seven SPICE datasets, and the QuickSight analysis, dashboard, and optional topic.
 
-Terraform manages durable infrastructure directly. A small CloudFormation stack provides Create/Update/Delete lifecycle events to the provisioner Lambda, which owns Athena DDL and QuickSight resources. CloudFormation does not deploy the rest of the solution.
+## Message content
 
-## Operational behavior
+`include_message_content` defaults to `true`. It collects `user_message` and `system_text_message` in the chat vended-log delivery, S3 data lake, and Athena `chat_logs` table.
 
-### Generated files
+The Chat Activity SPICE dataset and **Chat Session Details** table expose `user_message`. `system_text_message` is not exposed in QuickSight or the topic. **Agent Hours Details** cannot show message text because `AGENT_HOURS_LOGS` contains neither message fields nor a reliable conversation/message identifier. Set `include_message_content = false` before deployment when message content must not be collected.
 
-`archive_file` creates four reproducible ZIP packages in `terraform/` during plan/apply. They are ignored by Git along with `.terraform/`, `terraform.tfvars`, state, crash logs, and override files. Do not commit or share state or variable files.
+## Data arrival and SPICE
 
-### Data arrival and SPICE
+Quick activity first reaches the data lake through vended-log delivery and Firehose. Low-volume Firehose data can flush within roughly 60 seconds; upstream delivery adds independent latency. An ingestion can succeed before matching records exist.
 
-A successful ingestion confirms that its query completed, not that it returned rows. Data appears only after the relevant Quick activity reaches S3/Athena. Firehose can flush low-volume data within about 60 seconds, while vended-log and CloudTrail delivery introduce independent latency.
-
-Terraform schedules all seven SPICE datasets hourly. To test immediately, start a unique ingestion and inspect its terminal status and row count:
+All seven SPICE datasets refresh hourly. To request an immediate Chat Activity refresh:
 
 ```bash
 aws quicksight create-ingestion \
@@ -43,30 +41,32 @@ aws quicksight list-ingestions \
   --max-results 1
 ```
 
-Repeat for `feedback-analysis`, `agent-hours-usage`, `api-audit-trail`, `index-usage`, `licensed-users`, or `function-usage-distribution` as appropriate. The licensed-user Lambda runs hourly but replaces the current UTC day's snapshot, so the table contains the latest snapshot for each day rather than hourly history.
+Partition projection in the supplied SQL covers 2024–2030. Extend the range before 2031.
 
-Partition projection in the supplied SQL covers 2024–2030. Extend the projection range before 2031.
+## Validate
 
-### Authorization boundaries
-
-The Terraform deployer, provisioner Lambda, licensed-user Lambda, transform/streaming roles, and QuickSight service role are separate principals. The deployer installs runtime policies with `iam:PutRolePolicy`; it does not need the Glue DDL, QuickSight asset-management, SSM marker, S3 object, or KMS cryptographic actions used by runtime roles. See [`REQUIRED_PERMISSIONS.txt`](REQUIRED_PERMISSIONS.txt) and [`iam-policy.yaml`](iam-policy.yaml).
-
-Terraform adds a deployment-specific inline policy to `aws-quicksight-service-role-v0`. If IAM simulation permits Athena but QuickSight still reports `AccessDenied`, inspect enabled QuickSight IAM policy assignments before changing role policies:
+After `apply`, retrieve the dashboard and storage outputs:
 
 ```bash
-aws quicksight list-iam-policy-assignments \
-  --aws-account-id <account-id> \
-  --namespace default \
-  --assignment-status ENABLED
+terraform -chdir=terraform output dashboard_arn
+terraform -chdir=terraform output data_lake_bucket
+terraform -chdir=terraform plan
 ```
 
-### Teardown
+Generate Quick activity, then confirm that objects arrive in the data lake and that the Chat Activity dataset has completed an ingestion. `terraform plan` should report no changes after the deployment stabilizes.
 
-A normal destroy is blocked by lifecycle guards. For an approved full deletion:
+## Authorization boundaries
 
-1. Back up required data.
-2. Set `force_destroy_buckets = true` and apply.
-3. Remove the local guards in `terraform/20-data-storage.tf` and `terraform/10-security-kms.tf`.
-4. Run `terraform -chdir=terraform destroy`.
+The Terraform deployer, provisioner Lambda, licensed-user snapshot Lambda, transform/streaming roles, and QuickSight Athena data-source run-as role are separate principals. Terraform installs scoped runtime policies using `iam:PutRolePolicy`; the deployer does not directly receive the runtime Glue, Athena, S3-object, KMS, or QuickSight asset actions.
 
-CloudFormation must invoke the provisioner during deletion. A QuickSight/Athena failure, stale ownership marker, or custom-resource timeout can block deletion. Never schedule KMS deletion while retained encrypted objects still depend on the key.
+The dedicated QuickSight Athena run-as role provides the Athena, Glue, S3, and KMS access required by the data source. It avoids reliance on the shared QuickSight service role's session policy.
+
+## Teardown
+
+Normal destruction is blocked by lifecycle guards on the two S3 buckets and KMS key. For an approved full teardown, back up required data, set `force_destroy_buckets = true` and apply it, remove the three local `prevent_destroy` guards in `terraform/20-data-storage.tf` and `terraform/10-security-kms.tf`, then run:
+
+```bash
+terraform -chdir=terraform destroy
+```
+
+Restore `force_destroy_buckets = false` and all three guards immediately afterward. Do not schedule KMS key deletion while encrypted retained data depends on the key.

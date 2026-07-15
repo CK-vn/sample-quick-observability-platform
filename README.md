@@ -6,7 +6,7 @@ Terraform deployment for Amazon Quick observability. It collects chat, feedback,
 
 - Terraform 1.10+
 - AWS CLI credentials for the target account and Region
-- An active Amazon Quick/QuickSight subscription and `aws-quicksight-service-role-v0`
+- An active Amazon Quick/QuickSight subscription
 - A QuickSight owner user ARN
 
 Review [`docs/iam-policy.yaml`](docs/iam-policy.yaml) and [`docs/REQUIRED_PERMISSIONS.txt`](docs/REQUIRED_PERMISSIONS.txt) before deployment. The policy is a Terraform deployer baseline; Lambda and QuickSight runtime permissions are managed separately by Terraform.
@@ -27,7 +27,7 @@ terraform -chdir=terraform plan
 terraform -chdir=terraform apply
 ```
 
-Terraform deploys all infrastructure, the Athena catalog, QuickSight resources, and the supported topic datasets in one dependency graph. No separate deployment toolchain, bootstrap stack, or local deployment script is required.
+Terraform deploys all infrastructure, the Athena catalog, QuickSight resources, and the supported topic datasets in one dependency graph. No separate deployment toolchain, bootstrap stack, or local deployment script is required. Chat `user_message` and `system_text_message` fields are collected into CloudWatch, S3, and Athena by default; set `include_message_content = false` to exclude them. The Chat Activity SPICE dataset and **Chat Session Details** table include `user_message` when collection is enabled. `system_text_message` remains outside QuickSight, and message content is not added to topics or Agent Hours because that log type has no message fields.
 
 Useful outputs:
 

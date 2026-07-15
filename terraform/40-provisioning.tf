@@ -32,6 +32,7 @@ locals {
           ResourcePrefix    = var.resource_prefix
           DatabaseName      = local.database_name
           WorkGroup         = aws_athena_workgroup.observability.name
+          DataSourceRoleArn = aws_iam_role.quicksight_athena.arn
           OwnerArn          = var.quicksight_owner_arn
           Namespace         = var.quicksight_namespace
           CreateTopic       = tostring(var.create_quicksight_topic)
@@ -58,7 +59,7 @@ resource "aws_cloudformation_stack" "provisioning" {
 
   depends_on = [
     aws_lambda_permission.provisioner_cloudformation,
-    aws_iam_role_policy.quicksight_observability,
+    aws_iam_role_policy.quicksight_athena,
     aws_s3_bucket_policy.data_lake,
     aws_s3_bucket_policy.athena_results,
     aws_cloudwatch_log_delivery.quick,

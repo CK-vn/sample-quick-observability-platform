@@ -115,14 +115,35 @@ data "aws_iam_policy_document" "athena_results_bucket" {
   }
 
   statement {
-    sid    = "AllowQuickSightAthenaResults"
+    sid    = "AllowQuickSightAthenaResultsBucket"
     effect = "Allow"
     principals {
       type        = "AWS"
       identifiers = [local.quicksight_service_role_arn]
     }
-    actions   = ["s3:GetBucketLocation", "s3:GetObject", "s3:ListBucket", "s3:PutObject"]
-    resources = [aws_s3_bucket.athena_results.arn, "${aws_s3_bucket.athena_results.arn}/*"]
+    actions = [
+      "s3:GetBucketLocation",
+      "s3:ListBucket",
+      "s3:ListBucketMultipartUploads",
+    ]
+    resources = [aws_s3_bucket.athena_results.arn]
+  }
+
+  statement {
+    sid    = "AllowQuickSightAthenaResultsObjects"
+    effect = "Allow"
+    principals {
+      type        = "AWS"
+      identifiers = [local.quicksight_service_role_arn]
+    }
+    actions = [
+      "s3:AbortMultipartUpload",
+      "s3:GetObject",
+      "s3:GetObjectVersion",
+      "s3:ListMultipartUploadParts",
+      "s3:PutObject",
+    ]
+    resources = ["${aws_s3_bucket.athena_results.arn}/*"]
   }
 }
 

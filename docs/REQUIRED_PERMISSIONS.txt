@@ -65,9 +65,9 @@ LicensedUsersSnapshot Lambda
   - KMS Encrypt/GenerateDataKey on the deployment key
 
 Transform, Firehose, CloudWatch Logs delivery, and EventBridge roles are scoped
-to their log, stream, Lambda, S3-prefix, and KMS requirements. The existing
-`aws-quicksight-service-role-v0` receives a deployment-specific inline policy
-for Athena, Glue, S3, and KMS access.
+to their log, stream, Lambda, S3-prefix, and KMS requirements. Terraform also
+creates a dedicated QuickSight Athena data-source run-as role with scoped
+Athena, Glue, S3, and KMS access.
 
 --------------------------------------------------------------------------------
 3. CLOUDFORMATION CUSTOM-RESOURCE BOUNDARY
@@ -86,10 +86,8 @@ QuickSight/Athena operation can block `terraform destroy`.
 --------------------------------------------------------------------------------
 
   - An active Amazon Quick/QuickSight subscription in the target Region.
-  - Existing `aws-quicksight-service-role-v0` role.
   - A valid QuickSight owner user ARN in the selected namespace.
-  - Permission to attach the deployment-specific inline policy to the existing
-    QuickSight service role.
+  - Permission to create and pass the dedicated QuickSight Athena run-as role.
   - No SCP, permission boundary, KMS policy, or QuickSight IAM policy assignment
     that denies required calls.
 

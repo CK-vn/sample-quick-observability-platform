@@ -38,6 +38,16 @@ data "aws_iam_policy_document" "events_assume" {
   }
 }
 
+data "aws_iam_policy_document" "quicksight_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["quicksight.amazonaws.com"]
+    }
+  }
+}
+
 resource "aws_iam_role" "transform_lambda" {
   name               = "${local.pipeline_name}-Lambda-${var.aws_region}"
   assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
@@ -231,18 +241,39 @@ resource "aws_iam_role_policy" "provisioner" {
       },
       {
         Effect   = "Allow"
+        Action   = ["s3:ListBucketMultipartUploads"]
+        Resource = aws_s3_bucket.athena_results.arn
+      },
+      {
+        Effect   = "Allow"
         Action   = ["s3:GetObject"]
         Resource = "${aws_s3_bucket.data_lake.arn}/*"
       },
       {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject"]
+        Effect = "Allow"
+        Action = [
+          "s3:AbortMultipartUpload",
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+          "s3:ListMultipartUploadParts",
+          "s3:PutObject",
+        ]
         Resource = "${aws_s3_bucket.athena_results.arn}/*"
       },
       {
         Effect   = "Allow"
         Action   = ["kms:Decrypt", "kms:DescribeKey", "kms:Encrypt", "kms:GenerateDataKey"]
         Resource = aws_kms_key.observability.arn
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["iam:PassRole"]
+        Resource = aws_iam_role.quicksight_athena.arn
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "quicksight.amazonaws.com"
+          }
+        }
       },
       {
         Effect = "Allow"
@@ -284,9 +315,14 @@ resource "aws_iam_role_policy" "provisioner" {
   })
 }
 
-resource "aws_iam_role_policy" "quicksight_observability" {
+resource "aws_iam_role" "quicksight_athena" {
+  name               = "${var.resource_prefix}-QuickSightAthena-${var.aws_region}"
+  assume_role_policy = data.aws_iam_policy_document.quicksight_assume.json
+}
+
+resource "aws_iam_role_policy" "quicksight_athena" {
   name = "${var.resource_prefix}-observability-access"
-  role = "aws-quicksight-service-role-v0"
+  role = aws_iam_role.quicksight_athena.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -335,12 +371,23 @@ resource "aws_iam_role_policy" "quicksight_observability" {
       },
       {
         Effect   = "Allow"
+        Action   = ["s3:ListBucketMultipartUploads"]
+        Resource = aws_s3_bucket.athena_results.arn
+      },
+      {
+        Effect   = "Allow"
         Action   = ["s3:GetObject"]
         Resource = "${aws_s3_bucket.data_lake.arn}/*"
       },
       {
-        Effect   = "Allow"
-        Action   = ["s3:GetObject", "s3:PutObject"]
+        Effect = "Allow"
+        Action = [
+          "s3:AbortMultipartUpload",
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+          "s3:ListMultipartUploadParts",
+          "s3:PutObject",
+        ]
         Resource = "${aws_s3_bucket.athena_results.arn}/*"
       },
       {
