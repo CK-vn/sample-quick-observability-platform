@@ -7,29 +7,26 @@ assignees: ''
 ---
 
 **Describe the bug**
-A clear and concise description of what the bug is.
+A clear, concise description of the issue.
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Run `python3 deploy.py --...`
-2. See error
+**To reproduce**
+1. Run the relevant Terraform command or deployed workload.
+2. Describe the observed result.
 
 **Expected behavior**
-A clear and concise description of what you expected to happen.
+Describe the expected result.
 
-**Environment:**
+**Environment**
 - OS: [e.g. macOS, Linux, Windows]
-- Python version: [e.g. 3.12]
-- Node.js version: [e.g. 20]
-- AWS CDK version: [e.g. 2.150.0]
+- Terraform version: [e.g. 1.10]
+- AWS provider version: [e.g. 6.33.0]
 - AWS CLI version: [e.g. 2.15.0]
 
-**Deploy step:**
-- [ ] `--logs`
-- [ ] `--pipeline`
-- [ ] `--datacatalog`
-- [ ] `--dashboard`
-- [ ] `cleanup.py`
+**Terraform command**
+- [ ] `init`
+- [ ] `plan`
+- [ ] `apply`
+- [ ] `destroy`
 
 **Additional context**
-Add any other context about the problem here.
+Add any relevant logs, configuration (with secrets removed), or resource identifiers.

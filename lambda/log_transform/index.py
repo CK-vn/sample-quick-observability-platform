@@ -142,8 +142,7 @@ def transform_log_event(log_event, log_data):
         # that include data from connected enterprise sources.
         # Controlled by the INCLUDE_MESSAGE_CONTENT environment variable,
         # which is set during deployment based on the user's choice.
-        # To change this after deployment, update the Lambda env var and
-        # redeploy with: python3 deploy.py --pipeline
+        # To change this after deployment, update the Terraform variable and apply.
         if os.environ.get('INCLUDE_MESSAGE_CONTENT', 'false') == 'true':
             sensitive_fields = set()
         else:

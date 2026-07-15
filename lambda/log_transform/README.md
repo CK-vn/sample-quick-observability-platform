@@ -60,24 +60,7 @@ Possible result values: `Ok` (transformed successfully), `Dropped` (control mess
 
 ## Deployment
 
-This function is deployed automatically by the CDK PipelineStack:
-
-```python
-lambda_.Function(
-    self,
-    "LogTransformFunction",
-    function_name=f"{stack_name}-LogTransform",
-    code=lambda_.Code.from_asset("lambda/log_transform"),
-    handler="index.lambda_handler",
-    runtime=lambda_.Runtime.PYTHON_3_14,
-    timeout=Duration.seconds(300),
-    memory_size=512,
-    environment_encryption=self.data_lake_key,
-    environment={
-        "INCLUDE_MESSAGE_CONTENT": "true" if include_message_content else "false"
-    }
-)
-```
+Terraform packages and deploys this function from `lambda/log_transform/` as a Python 3.12 Lambda. Configure message retention through the `include_message_content` Terraform variable.
 
 ## Monitoring
 

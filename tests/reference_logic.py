@@ -13,7 +13,7 @@ without needing AWS infrastructure. The actual SQL is exercised separately
 by the integration tests in a later task (see tasks.md, task 18.3).
 
 This module is test-only support code and is not imported by application
-(Lambda/CDK) code.
+Lambda code.
 """
 from dataclasses import dataclass
 from datetime import date, datetime

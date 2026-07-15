@@ -1,32 +1,4 @@
-# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
-# SPDX-License-Identifier: MIT-0
-"""
-Amazon Quick Observability Platform - Quick Sight CDK Stack
-
-Creates all Quick Sight resources:
-- Athena data source
-- Datasets (Chat Activity, Feedback Analysis, Agent Hours Usage,
-  API Audit Trail, Index Usage)
-- Quick Sight analysis with KPI visuals, charts, and grid layout
-- Quick Sight dashboard published from the analysis
-
-Context parameters (from deploy.py):
-  quicksightDatabase    — Athena database name
-  quicksightWorkgroup   — Athena workgroup name
-  quicksightOwnerArn    — Quick Sight user ARN for permissions
-  resourcePrefix        — prefix for resource IDs
-"""
-
-from aws_cdk import (
-    Stack,
-    CfnOutput,
-    aws_quicksight as qs,
-    aws_iam as iam,
-)
-from constructs import Construct
-
-
-# ── Dataset configurations ────────────────────────────────────────────────
+"""Dashboard data and pure QuickSight-definition builders packaged with the Terraform provisioner."""
 
 DATASET_CONFIGS = [
     {
@@ -58,8 +30,6 @@ SELECT
     surface_type,
     web_search,
     message_scope,
-    user_message,
-    system_text_message,
     account_id,
     year, month, day
 FROM {database}.chat_logs
@@ -81,8 +51,6 @@ WHERE timestamp IS NOT NULL
             {"Name": "surface_type", "Type": "STRING"},
             {"Name": "web_search", "Type": "STRING"},
             {"Name": "message_scope", "Type": "STRING"},
-            {"Name": "user_message", "Type": "STRING"},
-            {"Name": "system_text_message", "Type": "STRING"},
             {"Name": "account_id", "Type": "STRING"},
             {"Name": "year", "Type": "INTEGER"},
             {"Name": "month", "Type": "INTEGER"},
@@ -93,7 +61,6 @@ WHERE timestamp IS NOT NULL
             "conversation_id", "agent_id", "flow_id",
             "latency_ms", "time_to_first_token_ms",
             "surface_type", "web_search", "message_scope",
-            "user_message", "system_text_message",
             "action_connectors", "namespace", "account_id",
         ],
     },
@@ -391,9 +358,6 @@ FROM {database}.index_usage
     },
 ]
 
-
-# ── Topic column definitions ──────────────────────────────────────────────
-
 TOPIC_COLUMNS = {
     "chat-activity": [
         {"ColumnName": "event_time", "ColumnFriendlyName": "Event Time", "ColumnDescription": "Timestamp of the chat message", "ColumnSynonyms": ["date", "time", "when", "timestamp", "message date"], "ColumnDataRole": "DIMENSION", "IsIncludedInTopic": True, "SemanticType": {"TypeName": "DATE"}, "TimeGranularity": "DAY", "DefaultFormatting": {"DisplayFormat": "DATE"}},
@@ -409,8 +373,6 @@ TOPIC_COLUMNS = {
         {"ColumnName": "surface_type", "ColumnFriendlyName": "Surface Type", "ColumnDescription": "Where the chat originated (console, IDE, etc.)", "ColumnSynonyms": ["channel", "interface", "source", "origin"], "IsIncludedInTopic": True, "SemanticType": {"TypeName": "CATEGORY"}},
         {"ColumnName": "web_search", "ColumnFriendlyName": "Web Search Used", "ColumnDescription": "Whether web search was used for the response", "ColumnSynonyms": ["internet", "web", "search"], "IsIncludedInTopic": True, "SemanticType": {"TypeName": "CATEGORY"}},
         {"ColumnName": "message_scope", "ColumnFriendlyName": "Message Scope", "ColumnDescription": "Resource scope of the message: no_resources, all_resources, or specific_resource", "ColumnSynonyms": ["scope", "resource scope", "context"], "IsIncludedInTopic": True, "SemanticType": {"TypeName": "CATEGORY"}},
-        {"ColumnName": "user_message", "ColumnFriendlyName": "User Message", "ColumnDescription": "Free-text message written by the user", "ColumnSynonyms": ["question", "prompt", "user text", "written message"], "IsIncludedInTopic": True},
-        {"ColumnName": "system_text_message", "ColumnFriendlyName": "Assistant Response", "ColumnDescription": "Free-text response written by the assistant", "ColumnSynonyms": ["answer", "reply", "response text", "assistant text"], "IsIncludedInTopic": True},
         {"ColumnName": "namespace", "ColumnFriendlyName": "Namespace", "IsIncludedInTopic": True},
         {"ColumnName": "account_id", "ColumnFriendlyName": "Account Id", "IsIncludedInTopic": False},
     ],
@@ -474,9 +436,6 @@ TOPIC_COLUMNS = {
     ],
 }
 
-
-# ── Custom instructions for Quick Sight Topics ───────────────────────────
-
 CUSTOM_INSTRUCTIONS = (
     "This topic answers questions about Amazon Quick Suite usage, adoption, "
     "satisfaction, and governance.\n\n"
@@ -522,9 +481,6 @@ CUSTOM_INSTRUCTIONS = (
     "relevant dataset with DISTINCT_COUNT or SUM as appropriate."
 )
 
-
-# ── Visual / layout helpers ───────────────────────────────────────────────
-
 def _make_visual(visual_id, title, visual_type, field_wells, drill_path=None,
                   dataset=None, missing_data_treatment=None):
     """Build a simplified visual spec dict.
@@ -546,11 +502,6 @@ def _make_visual(visual_id, title, visual_type, field_wells, drill_path=None,
         "dataset": dataset,
         "missing_data_treatment": missing_data_treatment,
     }
-
-
-# ── Sheet definitions ────────────────────────────────────────────────────
-# Minimal, high-impact visuals. Users can add drill-downs and filters
-# in the editable Analysis via the Quick Sight console.
 
 SHEET_DEFS = [
     # ── Sheet 1: Adoption Story ──────────────────────────────────────────
@@ -591,7 +542,7 @@ SHEET_DEFS = [
                          drill_path=["status", "user_name"]),
             _make_visual("adopt-details", "Chat Session Details", "TABLE",
                          {"category": "event_time",
-                          "extra_dimensions": ["user_name", "feature", "status", "conversation_id", "latency_ms", "surface_type", "user_message", "system_text_message"],
+                          "extra_dimensions": ["user_name", "feature", "status", "conversation_id", "latency_ms", "surface_type"],
                           "values": [],
                           "sort_desc": "event_time"}),
         ],
@@ -724,9 +675,6 @@ SHEET_DEFS = [
     },
 ]
 
-
-# ── Permission action lists (exact copy from setup_quicksight.py) ─────────
-
 OWNER_ACTIONS = {
     "datasource": [
         "quicksight:DescribeDataSource",
@@ -782,18 +730,9 @@ OWNER_ACTIONS = {
     ],
 }
 
-
-def _owner_permissions(principal_arn: str, resource_type: str) -> list:
-    """Build owner permissions for a Quick Sight resource."""
-    return [{"Principal": principal_arn, "Actions": OWNER_ACTIONS[resource_type]}]
-
-
-# ── Visual definition builders ────────────────────────────────────────────
-
 def _build_field_id(prefix, dataset_suffix, field_name):
     """Deterministic field ID for a dataset column."""
     return f"{prefix}-{dataset_suffix}-{field_name}"
-
 
 def _build_measure(prefix, ds_suffix, spec):
     """Build a MeasureField from a visual field spec."""
@@ -832,7 +771,6 @@ def _build_measure(prefix, ds_suffix, spec):
         }
     }
 
-
 def _build_dimension(prefix, ds_suffix, col_name):
     """Build a DimensionField for a category column."""
     fid = _build_field_id(prefix, ds_suffix, col_name)
@@ -840,7 +778,6 @@ def _build_dimension(prefix, ds_suffix, col_name):
     if col_name in ("event_time",):
         return {"DateDimensionField": {"FieldId": fid, "Column": col, "DateGranularity": "DAY", "HierarchyId": fid}}
     return {"CategoricalDimensionField": {"FieldId": fid, "Column": col}}
-
 
 def _build_visual_definition(prefix, ds_suffix, visual):
     """Convert simplified visual spec into a Quick Sight visual definition."""
@@ -1072,7 +1009,6 @@ def _build_visual_definition(prefix, ds_suffix, visual):
         }
     }
 
-
 def _build_grid_layout(prefix, sheet_def):
     """Build GridLayout elements for a sheet.
 
@@ -1134,645 +1070,3 @@ def _build_grid_layout(prefix, sheet_def):
                 chart_row += 12
 
     return elements
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# Stack
-# ══════════════════════════════════════════════════════════════════════════
-
-class QuickSightStack(Stack):
-    """CDK stack that creates Quick Sight resources:
-    data source, datasets, analysis, and dashboard."""
-
-    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
-        super().__init__(scope, construct_id, **kwargs)
-
-        account_id = Stack.of(self).account
-        region = Stack.of(self).region
-
-        # Context parameters
-        database = self.node.try_get_context("quicksightDatabase") or "quickobserve_db"
-        workgroup = self.node.try_get_context("quicksightWorkgroup") or "primary"
-        owner_arn = self.node.try_get_context("quicksightOwnerArn")
-        prefix = self.node.try_get_context("resourcePrefix") or "quickobserve"
-
-        # ── 0. Custom Theme ───────────────────────────────────────────────
-        theme_id = f"{prefix}-observability-theme"
-        theme = qs.CfnTheme(
-            self, "ObservabilityTheme",
-            aws_account_id=account_id,
-            theme_id=theme_id,
-            name="Quick Observability",
-            base_theme_id="RAINIER",
-            configuration=qs.CfnTheme.ThemeConfigurationProperty(
-                data_color_palette=qs.CfnTheme.DataColorPaletteProperty(
-                    colors=[
-                        "#268EE5", "#1659A9", "#5FAEF0", "#A1C2FB",
-                        "#A9DFFF", "#DDEDFF", "#90D9F6", "#F0F3F5",
-                        "#6F23C7", "#1C79F1", "#DDDDDB", "#BACDE6",
-                        "#7D008B", "#EEEE5E", "#FDE9EB", "#E1DBF6",
-                        "#F3F3F4", "#FF02A3", "#D703B2", "#1B2250",
-                    ],
-                    min_max_gradient=["#ADC7FF", "#7D008B"],
-                    empty_fill_color="#F6F7F8",
-                ),
-                ui_color_palette=qs.CfnTheme.UIColorPaletteProperty(
-                    primary_foreground="#243040",
-                    primary_background="#F6F5FB",
-                    secondary_foreground="#4D5A6A",
-                    secondary_background="#F6F5FB",
-                    accent="#177199",
-                    accent_foreground="#FFFFFF",
-                    danger="#A01106",
-                    danger_foreground="#FFFFFF",
-                    warning="#D48104",
-                    warning_foreground="#FFFFFF",
-                    success="#218001",
-                    success_foreground="#FFFFFF",
-                    dimension="#177199",
-                    dimension_foreground="#FFFFFF",
-                    measure="#218001",
-                    measure_foreground="#FFFFFF",
-                ),
-                sheet=qs.CfnTheme.SheetStyleProperty(
-                    tile=qs.CfnTheme.TileStyleProperty(
-                        border=qs.CfnTheme.BorderStyleProperty(show=True),
-                    ),
-                    tile_layout=qs.CfnTheme.TileLayoutStyleProperty(
-                        gutter=qs.CfnTheme.GutterStyleProperty(show=False),
-                        margin=qs.CfnTheme.MarginStyleProperty(show=False),
-                    ),
-                ),
-                typography=qs.CfnTheme.TypographyProperty(
-                    font_families=[
-                        qs.CfnTheme.FontProperty(font_family="Amazon Ember"),
-                        qs.CfnTheme.FontProperty(font_family="sans-serif"),
-                    ],
-                ),
-            ),
-            permissions=[
-                qs.CfnTheme.ResourcePermissionProperty(
-                    principal=owner_arn,
-                    actions=[
-                        "quicksight:DescribeTheme",
-                        "quicksight:DescribeThemeAlias",
-                        "quicksight:DescribeThemePermissions",
-                        "quicksight:ListThemeVersions",
-                        "quicksight:ListThemeAliases",
-                        "quicksight:UpdateTheme",
-                        "quicksight:UpdateThemeAlias",
-                        "quicksight:UpdateThemePermissions",
-                        "quicksight:CreateThemeAlias",
-                        "quicksight:DeleteTheme",
-                        "quicksight:DeleteThemeAlias",
-                    ],
-                )
-            ],
-        )
-
-        # ── 1. Data Source ────────────────────────────────────────────────
-        ds_id = f"{prefix}-athena-source"
-        data_source = qs.CfnDataSource(
-            self, "AthenaDataSource",
-            aws_account_id=account_id,
-            data_source_id=ds_id,
-            name="Quick Observability - Athena",
-            type="ATHENA",
-            data_source_parameters=qs.CfnDataSource.DataSourceParametersProperty(
-                athena_parameters=qs.CfnDataSource.AthenaParametersProperty(
-                    work_group=workgroup,
-                ),
-            ),
-            ssl_properties=qs.CfnDataSource.SslPropertiesProperty(
-                disable_ssl=False,
-            ),
-            permissions=[
-                qs.CfnDataSource.ResourcePermissionProperty(
-                    principal=owner_arn,
-                    actions=OWNER_ACTIONS["datasource"],
-                )
-            ],
-        )
-
-        # ── 2. Datasets ──────────────────────────────────────────────────
-        data_source_arn = f"arn:aws:quicksight:{region}:{account_id}:datasource/{ds_id}"
-        dataset_cfn_resources = {}
-
-        for config in DATASET_CONFIGS:
-            ds_dataset_id = f"{prefix}-{config['id_suffix']}"
-            sql = config["sql"].format(database=database).strip()
-
-            dataset = qs.CfnDataSet(
-                self, f"Dataset-{config['id_suffix']}",
-                aws_account_id=account_id,
-                data_set_id=ds_dataset_id,
-                name=config["name"],
-                physical_table_map={
-                    "CustomSQL": qs.CfnDataSet.PhysicalTableProperty(
-                        custom_sql=qs.CfnDataSet.CustomSqlProperty(
-                            data_source_arn=data_source_arn,
-                            name=config["name"],
-                            sql_query=sql,
-                            columns=[
-                                qs.CfnDataSet.InputColumnProperty(
-                                    name=col["Name"],
-                                    type=col["Type"],
-                                )
-                                for col in config["input_columns"]
-                            ],
-                        ),
-                    ),
-                },
-                import_mode="SPICE",
-                permissions=[
-                    qs.CfnDataSet.ResourcePermissionProperty(
-                        principal=owner_arn,
-                        actions=OWNER_ACTIONS["dataset"],
-                    )
-                ],
-            )
-
-            # Add LogicalTableMap with ProjectOperation to select and order
-            # visible columns, following Quick Sight conventions.
-            projected = config.get("projected_columns")
-            if projected:
-                dataset.add_property_override("LogicalTableMap", {
-                    "LogicalTable": {
-                        "Alias": config["name"],
-                        "DataTransforms": [
-                            {
-                                "ProjectOperation": {
-                                    "ProjectedColumns": projected,
-                                }
-                            }
-                        ],
-                        "Source": {
-                            "PhysicalTableId": "CustomSQL",
-                        },
-                    }
-                })
-            dataset.add_dependency(data_source)
-            dataset_cfn_resources[config["id_suffix"]] = dataset
-
-        # ── 2b. Dataset refresh schedules (daily full refresh) ────────────
-        for config in DATASET_CONFIGS:
-            ds_dataset_id = f"{prefix}-{config['id_suffix']}"
-            schedule = qs.CfnRefreshSchedule(
-                self, f"RefreshSchedule-{config['id_suffix']}",
-                aws_account_id=account_id,
-                data_set_id=ds_dataset_id,
-                schedule=qs.CfnRefreshSchedule.RefreshScheduleMapProperty(
-                    schedule_id=f"{prefix}-{config['id_suffix']}-daily",
-                    refresh_type="FULL_REFRESH",
-                    schedule_frequency=qs.CfnRefreshSchedule.ScheduleFrequencyProperty(
-                        interval="DAILY",
-                        time_of_the_day="06:00",
-                        time_zone="UTC",
-                    ),
-                ),
-            )
-            schedule.add_dependency(dataset_cfn_resources[config["id_suffix"]])
-
-
-        # ── 3. Analysis ──────────────────────────────────────────────────
-        analysis_id = f"{prefix}-observability-analysis"
-
-        # Dataset identifier declarations — datasets used as a sheet's own
-        # dataset, plus any dataset a visual overrides via visual["dataset"]
-        # (e.g. "function-usage-distribution", which is never a sheet's own
-        # dataset — only referenced per-visual).
-        used_datasets = {sd["dataset"] for sd in SHEET_DEFS}
-        for sd in SHEET_DEFS:
-            for v in sd["visuals"]:
-                override = v.get("dataset")
-                if override:
-                    used_datasets.add(override)
-        ds_id_map = {
-            cfg["id_suffix"]: f"{prefix}-{cfg['id_suffix']}"
-            for cfg in DATASET_CONFIGS
-            if cfg["id_suffix"] in used_datasets
-        }
-        dataset_identifiers = [
-            {
-                "Identifier": suffix,
-                "DataSetArn": f"arn:aws:quicksight:{region}:{account_id}:dataset/{ds_id_val}",
-            }
-            for suffix, ds_id_val in ds_id_map.items()
-        ]
-
-        # Build sheets with grid layout
-        sheets = []
-
-        # These are analysis-level (standalone) CalculatedFields, so they must
-        # use plain aggregate functions only. LAC-W / "Over" functions (e.g.
-        # distinctCountOver, sumOver) are only valid inside a visual's own
-        # table-calculation context and are rejected here by QuickSight with
-        # CONTEXTUAL_UNSUPPORTED_FUNCTION. The denominator instead uses a
-        # plain distinct_count of truncated dates to count distinct calendar
-        # days, which is fully supported at the analysis level.
-        calculated_fields = [
-            {
-                "DataSetIdentifier": "chat-activity",
-                "Name": "daily_avg_usage_volume",
-                "Expression": (
-                    "distinct_count({conversation_id}) / "
-                    "distinct_count(truncDate('DD', {event_time}))"
-                ),
-            },
-            {
-                "DataSetIdentifier": "agent-hours-usage",
-                "Name": "daily_avg_agent_hours",
-                "Expression": (
-                    "sum({hours}) / "
-                    "distinct_count(truncDate('DD', {event_time}))"
-                ),
-            },
-        ]
-
-        for sheet_def in SHEET_DEFS:
-            sheet_id = f"{prefix}-sheet-{sheet_def['id_suffix']}"
-            ds_suffix = sheet_def["dataset"]
-            visuals = [
-                _build_visual_definition(prefix, ds_suffix, v)
-                for v in sheet_def["visuals"]
-            ]
-            grid_elements = _build_grid_layout(prefix, sheet_def)
-
-            # Find the detail table visual ID (last TABLE visual on the sheet)
-            detail_table_vid = None
-            for v in reversed(sheet_def["visuals"]):
-                if v["type"] == "TABLE":
-                    detail_table_vid = f"{prefix}-{v['visual_id']}"
-                    break
-
-            # Add DATA_POINT_CLICK action on every non-table visual to filter
-            # the detail table, so users can click any chart element to see
-            # the underlying records.
-            if detail_table_vid:
-                for i, v in enumerate(sheet_def["visuals"]):
-                    if v["type"] == "TABLE":
-                        continue
-                    vid = f"{prefix}-{v['visual_id']}"
-                    action = {
-                        "CustomActionId": f"{vid}-filter-action",
-                        "Name": "Filter details",
-                        "Trigger": "DATA_POINT_CLICK",
-                        "Status": "ENABLED",
-                        "ActionOperations": [{
-                            "FilterOperation": {
-                                "SelectedFieldsConfiguration": {
-                                    "SelectedFieldOptions": "ALL_FIELDS",
-                                },
-                                "TargetVisualsConfiguration": {
-                                    "SameSheetTargetVisualConfiguration": {
-                                        "TargetVisuals": [detail_table_vid],
-                                    }
-                                },
-                            }
-                        }],
-                    }
-                    # Find the visual dict key (e.g. "BarChartVisual", "PieChartVisual")
-                    visual_dict = visuals[i]
-                    for key in visual_dict:
-                        if key.endswith("Visual"):
-                            if "Actions" not in visual_dict[key]:
-                                visual_dict[key]["Actions"] = []
-                            visual_dict[key]["Actions"].append(action)
-                            break
-
-            sheets.append({
-                "SheetId": sheet_id,
-                "Name": sheet_def["name"],
-                "Visuals": visuals,
-                "Layouts": [{
-                    "Configuration": {
-                        "GridLayout": {
-                            "Elements": grid_elements,
-                        }
-                    }
-                }],
-            })
-
-        # ── Parameters: date range pickers ──────────────────────────────
-        # Use fixed static defaults; Quick Sight will use them on first load.
-        # Users can change the date range via the DateTimePicker controls.
-        parameter_declarations = [
-            {
-                "DateTimeParameterDeclaration": {
-                    "Name": "StartDate",
-                    "TimeGranularity": "DAY",
-                    "DefaultValues": {
-                        "RollingDate": {
-                            "Expression": "truncDate('YYYY', now())",
-                        },
-                    },
-                }
-            },
-            {
-                "DateTimeParameterDeclaration": {
-                    "Name": "EndDate",
-                    "TimeGranularity": "DAY",
-                    "DefaultValues": {
-                        "RollingDate": {
-                            "Expression": "now()",
-                        },
-                    },
-                }
-            },
-            {
-                "IntegerParameterDeclaration": {
-                    "Name": "InactivityThresholdDays",
-                    "ParameterValueType": "SINGLE_VALUED",
-                    "DefaultValues": {
-                        "StaticValues": [30],
-                    },
-                }
-            },
-        ]
-
-        # ── Filter groups: one per sheet, scoped to that sheet's dataset ──
-        # The "licensed-users" sheet's dataset has no event_time column (its
-        # schema is keyed on inactivity_period, not a generic time range) so
-        # it is excluded from this generic date-range TimeRangeFilter loop.
-        # It gets its own NumericRangeFilter/InactivityThresholdDays wiring
-        # below instead.
-        filter_groups = []
-        for sheet_def in SHEET_DEFS:
-            if sheet_def["id_suffix"] == "licensed-users":
-                continue
-            sheet_id = f"{prefix}-sheet-{sheet_def['id_suffix']}"
-            ds_suffix = sheet_def["dataset"]
-            fg_id = f"{prefix}-fg-{sheet_def['id_suffix']}"
-            filter_id = f"{prefix}-filter-date-{sheet_def['id_suffix']}"
-
-            filter_groups.append({
-                "FilterGroupId": fg_id,
-                "Filters": [{
-                    "TimeRangeFilter": {
-                        "FilterId": filter_id,
-                        "Column": {
-                            "DataSetIdentifier": ds_suffix,
-                            "ColumnName": "event_time",
-                        },
-                        "RangeMinimumValue": {"Parameter": "StartDate"},
-                        "RangeMaximumValue": {"Parameter": "EndDate"},
-                        "NullOption": "ALL_VALUES",
-                        "IncludeMinimum": True,
-                        "IncludeMaximum": True,
-                    }
-                }],
-                "ScopeConfiguration": {
-                    "SelectedSheets": {
-                        "SheetVisualScopingConfigurations": [{
-                            "SheetId": sheet_id,
-                            "Scope": "ALL_VISUALS",
-                        }]
-                    }
-                },
-                "CrossDataset": "SINGLE_DATASET",
-                "Status": "ENABLED",
-            })
-
-            # A sheet may host visuals sourced from datasets other than its
-            # own (via a per-visual "dataset" override, e.g.
-            # "function-usage-distribution" on the "adoption" sheet). Each
-            # such extra dataset needs its own date-range filter group,
-            # scoped to the same sheet, alongside the sheet's own.
-            extra_datasets = sorted({
-                v["dataset"] for v in sheet_def["visuals"]
-                if v.get("dataset") and v["dataset"] != ds_suffix
-            })
-            for extra_ds_suffix in extra_datasets:
-                extra_fg_id = f"{prefix}-fg-{sheet_def['id_suffix']}-{extra_ds_suffix}"
-                extra_filter_id = f"{prefix}-filter-date-{sheet_def['id_suffix']}-{extra_ds_suffix}"
-
-                filter_groups.append({
-                    "FilterGroupId": extra_fg_id,
-                    "Filters": [{
-                        "TimeRangeFilter": {
-                            "FilterId": extra_filter_id,
-                            "Column": {
-                                "DataSetIdentifier": extra_ds_suffix,
-                                "ColumnName": "event_time",
-                            },
-                            "RangeMinimumValue": {"Parameter": "StartDate"},
-                            "RangeMaximumValue": {"Parameter": "EndDate"},
-                            "NullOption": "ALL_VALUES",
-                            "IncludeMinimum": True,
-                            "IncludeMaximum": True,
-                        }
-                    }],
-                    "ScopeConfiguration": {
-                        "SelectedSheets": {
-                            "SheetVisualScopingConfigurations": [{
-                                "SheetId": sheet_id,
-                                "Scope": "ALL_VISUALS",
-                            }]
-                        }
-                    },
-                    "CrossDataset": "SINGLE_DATASET",
-                    "Status": "ENABLED",
-                })
-
-        # ── Licensed Users sheet: inactivity threshold filter ────────────
-        # NumericRangeFilter on licensed_users_activity.inactivity_period,
-        # bound to the InactivityThresholdDays parameter with
-        # greater-than-or-equal-to semantics (IncludeMinimum=True). Scoped to
-        # only the two visuals that should reflect the inactivity threshold
-        # (the inactive-users KPI and table) — NOT the total-licensed-users
-        # KPI, which must always show the true total regardless of
-        # inactivity.
-        licensed_users_sheet_id = f"{prefix}-sheet-licensed-users"
-        filter_groups.append({
-            "FilterGroupId": f"{prefix}-fg-licensed-users-threshold",
-            "Filters": [{
-                "NumericRangeFilter": {
-                    "FilterId": f"{prefix}-filter-licensed-users-threshold",
-                    "Column": {
-                        "DataSetIdentifier": "licensed-users",
-                        "ColumnName": "inactivity_period",
-                    },
-                    "RangeMinimum": {"Parameter": "InactivityThresholdDays"},
-                    "IncludeMinimum": True,
-                    "NullOption": "ALL_VALUES",
-                }
-            }],
-            "ScopeConfiguration": {
-                "SelectedSheets": {
-                    "SheetVisualScopingConfigurations": [{
-                        "SheetId": licensed_users_sheet_id,
-                        "Scope": "SELECTED_VISUALS",
-                        "VisualIds": [
-                            f"{prefix}-licensed-kpi-inactive",
-                            f"{prefix}-licensed-inactive-table",
-                        ],
-                    }]
-                }
-            },
-            "CrossDataset": "SINGLE_DATASET",
-            "Status": "ENABLED",
-        })
-
-        # ── Add ParameterControls to each sheet ──────────────────────────
-        for i, sheet_def in enumerate(SHEET_DEFS):
-            suffix = sheet_def["id_suffix"]
-
-            # Add visual-scoped category filters (e.g. source_type = KB)
-            for vf in sheet_def.get("visual_filters", []):
-                vf_vid = f"{prefix}-{vf['visual_id']}"
-                vf_col = vf["column"]
-                vf_vals = vf["values"]
-                vf_fg_id = f"{prefix}-fg-{suffix}-{vf['visual_id']}"
-                vf_filter_id = f"{prefix}-filter-{suffix}-{vf['visual_id']}-{vf_col}"
-                sheet_id = f"{prefix}-sheet-{suffix}"
-                ds_suffix = sheet_def["dataset"]
-
-                filter_groups.append({
-                    "FilterGroupId": vf_fg_id,
-                    "Filters": [{
-                        "CategoryFilter": {
-                            "FilterId": vf_filter_id,
-                            "Column": {
-                                "DataSetIdentifier": ds_suffix,
-                                "ColumnName": vf_col,
-                            },
-                            "Configuration": {
-                                "FilterListConfiguration": {
-                                    "MatchOperator": "CONTAINS",
-                                    "CategoryValues": vf_vals,
-                                }
-                            },
-                        }
-                    }],
-                    "ScopeConfiguration": {
-                        "SelectedSheets": {
-                            "SheetVisualScopingConfigurations": [{
-                                "SheetId": sheet_id,
-                                "Scope": "SELECTED_VISUALS",
-                                "VisualIds": [vf_vid],
-                            }]
-                        }
-                    },
-                    "CrossDataset": "SINGLE_DATASET",
-                    "Status": "ENABLED",
-                })
-
-            if suffix == "licensed-users":
-                # This sheet's dataset has no event_time column, so the
-                # generic StartDate/EndDate DateTimePicker controls don't
-                # apply here. It gets its own InactivityThresholdDays
-                # slider control instead.
-                sheets[i]["ParameterControls"] = [
-                    {
-                        "Slider": {
-                            "ParameterControlId": f"{prefix}-ctrl-threshold-{suffix}",
-                            "SourceParameterName": "InactivityThresholdDays",
-                            "Title": "Inactivity Threshold (days)",
-                            "MinimumValue": 0,
-                            "MaximumValue": 365,
-                            "StepSize": 1,
-                        }
-                    },
-                ]
-            else:
-                sheets[i]["ParameterControls"] = [
-                    {
-                        "DateTimePicker": {
-                            "ParameterControlId": f"{prefix}-ctrl-start-{suffix}",
-                            "SourceParameterName": "StartDate",
-                            "Title": "Start Date",
-                        }
-                    },
-                    {
-                        "DateTimePicker": {
-                            "ParameterControlId": f"{prefix}-ctrl-end-{suffix}",
-                            "SourceParameterName": "EndDate",
-                            "Title": "End Date",
-                        }
-                    },
-                ]
-
-        definition = {
-            "DataSetIdentifierDeclarations": dataset_identifiers,
-            "ParameterDeclarations": parameter_declarations,
-            "FilterGroups": filter_groups,
-            "CalculatedFields": calculated_fields,
-            "Sheets": sheets,
-        }
-
-        analysis = qs.CfnAnalysis(
-            self, "ObservabilityAnalysis",
-            aws_account_id=account_id,
-            analysis_id=analysis_id,
-            name="Quick Observability Analysis",
-            theme_arn=f"arn:aws:quicksight:{region}:{account_id}:theme/{theme_id}",
-            permissions=[
-                qs.CfnAnalysis.ResourcePermissionProperty(
-                    principal=owner_arn,
-                    actions=OWNER_ACTIONS["analysis"],
-                )
-            ],
-        )
-        # Use add_property_override to set the Definition property directly
-        # with PascalCase CloudFormation keys, bypassing JSII strict typing
-        # for the deeply nested visual/sheet/filter structures.
-        analysis.add_property_override("Definition", definition)
-        for ds_cfn in dataset_cfn_resources.values():
-            analysis.add_dependency(ds_cfn)
-        analysis.add_dependency(theme)
-
-        # ── 5. Dashboard ─────────────────────────────────────────────────
-        dashboard_id = f"{prefix}-observability-dashboard"
-
-        # Grant "Everyone in this account" link-sharing access by default,
-        # so every registered Quick Sight user in the default namespace can
-        # view the dashboard without needing individual/manual sharing.
-        # This mirrors the read-only actions AWS documents for the
-        # UpdateDashboardPermissions --grant-link-permissions CLI flow:
-        # https://docs.aws.amazon.com/quick/latest/userguide/share-a-dashboard-grant-access-everyone-api.html
-        default_namespace_arn = f"arn:aws:quicksight:{region}:{account_id}:namespace/default"
-
-        dashboard = qs.CfnDashboard(
-            self, "ObservabilityDashboard",
-            aws_account_id=account_id,
-            dashboard_id=dashboard_id,
-            name="Quick Observability Dashboard",
-            theme_arn=f"arn:aws:quicksight:{region}:{account_id}:theme/{theme_id}",
-            permissions=[
-                qs.CfnDashboard.ResourcePermissionProperty(
-                    principal=owner_arn,
-                    actions=OWNER_ACTIONS["dashboard"],
-                )
-            ],
-            link_sharing_configuration=qs.CfnDashboard.LinkSharingConfigurationProperty(
-                permissions=[
-                    qs.CfnDashboard.ResourcePermissionProperty(
-                        principal=default_namespace_arn,
-                        actions=[
-                            "quicksight:DescribeDashboard",
-                            "quicksight:QueryDashboard",
-                            "quicksight:ListDashboardVersions",
-                        ],
-                    )
-                ],
-            ),
-        )
-        # Dashboard uses the same Definition as the analysis
-        dashboard.add_property_override("Definition", definition)
-        dashboard.add_dependency(analysis)
-
-        # ── Outputs ──────────────────────────────────────────────────────
-        for config in DATASET_CONFIGS:
-            ds_id = f"{prefix}-{config['id_suffix']}"
-            CfnOutput(self, f"DatasetArn-{config['id_suffix']}",
-                      value=f"arn:aws:quicksight:{region}:{account_id}:dataset/{ds_id}",
-                      description=f"Quick Sight Dataset ARN — {config['name']}")
-        CfnOutput(self, "AnalysisArn",
-                  value=f"arn:aws:quicksight:{region}:{account_id}:analysis/{analysis_id}",
-                  description="Quick Sight Analysis ARN")
-        CfnOutput(self, "DashboardArn",
-                  value=f"arn:aws:quicksight:{region}:{account_id}:dashboard/{dashboard_id}",
-                  description="Quick Sight Dashboard ARN")
-        CfnOutput(self, "ThemeArn",
-                  value=f"arn:aws:quicksight:{region}:{account_id}:theme/{theme_id}",
-                  description="Quick Sight Theme ARN")

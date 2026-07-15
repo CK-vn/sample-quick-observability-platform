@@ -1,10 +1,8 @@
 """Root conftest.py.
 
-Ensures the repo root is on sys.path so tests can import `cdk/*` modules
-directly (e.g. `import cdk.dashboard_stack`) and `lambda/*` modules via
-`importlib.import_module("lambda.log_transform.index")` -- `lambda` is a
-reserved keyword in Python so it cannot be imported with a plain `import`
-statement, only via `importlib`.
+Ensures the repository root is on ``sys.path`` so tests can load Lambda
+modules through :mod:`importlib`; ``lambda`` is a Python keyword and cannot
+be used in a plain import statement.
 """
 import os
 import sys

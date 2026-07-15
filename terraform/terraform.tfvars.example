@@ -1,0 +1,6 @@
+aws_region              = "us-east-1"
+resource_prefix          = "quickobserve"
+quicksight_owner_arn     = "arn:aws:quicksight:us-east-1:123456789012:user/default/example-user"
+include_message_content  = false
+create_quicksight_topic  = true
+force_destroy_buckets    = false

@@ -18,6 +18,6 @@ Fixes # (issue)
 - [ ] I have commented my code, particularly in hard-to-understand areas
 - [ ] I have made corresponding changes to the documentation
 - [ ] My changes generate no new warnings
-- [ ] I have run `python3 deploy.py --logs` and `--pipeline` successfully
-- [ ] CDK synth completes without errors
-- [ ] Security scan passes with no actionable findings (e.g., [cdk-nag](https://github.com/cdklabs/cdk-nag))
+- [ ] I have run `terraform -chdir=terraform fmt -check -recursive`
+- [ ] I have run `terraform -chdir=terraform validate`
+- [ ] I have reviewed the Terraform plan or documented why it was not run

@@ -25,7 +25,6 @@ venv/
 env/
 ENV/
 .venv/
-cdk/.venv/
 
 # IDE
 .vscode/
@@ -51,16 +50,17 @@ Thumbs.db
 *.log
 logs/
 
-# AWS CDK
-cdk.out/
-cdk/cdk.out/
-cdk/cdk-outputs.json
-cdk/cdk-outputs.tmp.json
-cdk/logs-config.json
-cdk/kms-config.json
-cdk/datacatalog-config.json
-cdk/deploy-config.json
-cdk.context.json
+# Terraform
+.terraform/
+terraform/terraform.tfvars
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/crash.log
+terraform/crash.*.log
+terraform/override.tf
+terraform/override.tf.json
+terraform/*_override.tf
+terraform/*_override.tf.json
 
 # Build artifacts
 build/
@@ -71,7 +71,6 @@ build/
 
 # Hypothesis (property-based testing)
 .hypothesis/
-cdk/.hypothesis/
 
 # Test artifacts
 .pytest_cache/

@@ -1,289 +1,114 @@
 ================================================================================
 AMAZON QUICK OBSERVABILITY PLATFORM
-Required AWS IAM Permissions for Deployment on a New AWS Account
+AWS IAM PERMISSION MODEL
 ================================================================================
 
-Audience: IT / Cloud administrators provisioning an IAM user or role for
-whoever will deploy this repository (via deploy.py, scripts/setup_datacatalog.py,
-scripts/create_topic.py, and cleanup.py).
+Audience: security and cloud administrators reviewing Terraform deployment access.
 
-This document lists the AWS permissions needed, grouped by what each
-deployment step actually does. A ready-to-attach IAM policy document is in
-iam-policy.yaml in this same folder. Read that file's header comments before
-attaching it — it includes notes on scoping resources down after first
-deployment.
-
-Two access-control modes are supported for the data catalog step; pick ONE:
-  A) IAM access control (recommended for most teams, simpler, no extra admin
-     role needed)
-  B) AWS Lake Formation (fine-grained column/table access control; requires
-     the deploying identity to ALSO be a Lake Formation administrator, which
-     is an account-wide privilege — see the note in Step 3 below)
+`docs/iam-policy.yaml` is a deployer-policy baseline. It does not include
+runtime permissions; Terraform installs scoped inline policies on runtime roles.
+Apply organization controls such as permission boundaries, SCPs, approved tag
+conditions, and resource-prefix scoping before production use.
 
 --------------------------------------------------------------------------------
-0. ONE-TIME ACCOUNT SETUP (usually done by an account admin, not the deployer)
+1. TERRAFORM DEPLOYER
 --------------------------------------------------------------------------------
 
-CDK Bootstrap (creates the CDKToolkit stack: a staging S3 bucket, an ECR
-repository for container image assets, and a handful of IAM roles that CDK
-itself uses to publish and deploy). Needed once per AWS account + region:
+The Terraform identity manages:
 
-  - cloudformation:*                 (on stack/CDKToolkit/*)
-  - s3:CreateBucket, PutBucketPolicy, PutBucketVersioning,
-    PutEncryptionConfiguration, PutBucketPublicAccessBlock,
-    PutLifecycleConfiguration                (on the bootstrap staging bucket)
-  - ecr:CreateRepository, SetRepositoryPolicy, PutLifecyclePolicy
-  - iam:CreateRole, PutRolePolicy, AttachRolePolicy, GetRole,
-    CreatePolicy (on the small set of CDK bootstrap roles/policies)
-  - ssm:PutParameter, GetParameter          (stores the bootstrap version)
+  - KMS key, alias, rotation, key policy, tags, and deletion lifecycle
+  - CloudWatch log groups, vended-log delivery, and subscription filters
+  - two S3 buckets and their policy/encryption/versioning/public-access config
+  - four Lambda functions and two resource-based invoke permissions
+  - five Firehose streams and two EventBridge rules/targets
+  - service IAM roles and inline role policies
+  - one Athena workgroup and one CloudFormation lifecycle-bridge stack
 
-If your organization already has CDK bootstrapped in the target account and
-region for other projects, this step can be skipped entirely.
+It also calls `sts:GetCallerIdentity` and
+`quicksight:AllowVendedLogDeliveryForResource`.
 
---------------------------------------------------------------------------------
-1. IDENTITY / ACCOUNT DETECTION (used by every step)
---------------------------------------------------------------------------------
+The exact baseline actions are in `iam-policy.yaml`; `permissions-list.txt`
+contains the matching flattened Action inventory. The policy includes provider
+read/delete calls required by pinned AWS provider 6.33.0.
 
-  - sts:GetCallerIdentity
-  - cloudformation:DescribeStacks, ListStacks, DescribeStackEvents,
-    DescribeStackResources, ListStackResources
-  - cloudformation:CreateChangeSet, ExecuteChangeSet, DeleteChangeSet,
-    DescribeChangeSet
-  - cloudformation:CreateStack, UpdateStack, DeleteStack, GetTemplate
+`iam:PassRole` is restricted to Lambda, Firehose, CloudWatch Logs, and
+EventBridge. Before production approval, scope role-management and PassRole
+resources to the generated role ARNs for the chosen prefix. Scope other
+statements to known account, Region, bucket, key, and stack ARNs where possible.
 
---------------------------------------------------------------------------------
-2. STEP 1 — CloudWatch Logs setup (deploy.py --logs)
---------------------------------------------------------------------------------
-
-Creates: a customer-managed KMS key, 4 CloudWatch Log Groups, and the vended
-logs delivery configuration that connects Amazon Quick to those log groups.
-
-  - kms:CreateKey, DescribeKey, CreateAlias, DeleteAlias, EnableKeyRotation,
-    GetKeyRotationStatus, PutKeyPolicy, GetKeyPolicy, ScheduleKeyDeletion,
-    TagResource
-  - logs:CreateLogGroup, DeleteLogGroup, DescribeLogGroups, TagResource,
-    AssociateKmsKey, DisassociateKmsKey
-  - logs:PutDeliverySource, GetDeliverySource, DeleteDeliverySource,
-    PutDeliveryDestination, GetDeliveryDestination, DeleteDeliveryDestination,
-    CreateDelivery, GetDelivery, DeleteDelivery, DescribeDeliveries,
-    PutDeliveryDestinationPolicy, GetDeliveryDestinationPolicy
-  - quicksight:AllowVendedLogDeliveryForResource   (REQUIRED — lets Amazon
-    Quick send logs into your CloudWatch Log Groups)
-  - quicksight:ListNamespaces, DescribeAccountSubscription, ListUsers
-    (used to auto-detect the Amazon Quick subscription region and console
-    users; read-only)
+The baseline intentionally excludes Glue/Athena catalog execution, QuickSight
+asset lifecycle actions, SSM ownership markers, S3 data-object access, and KMS
+cryptographic access. Those are runtime responsibilities described below.
+Lake Formation administration is outside this repository's Terraform workflow.
 
 --------------------------------------------------------------------------------
-3. STEP 2 — Data pipeline (deploy.py --pipeline)
+2. TERRAFORM-MANAGED RUNTIME PRINCIPALS
 --------------------------------------------------------------------------------
 
-Creates: an S3 data lake bucket, 3 Lambda functions (2 Firehose transform
-functions plus the scheduled Licensed_Users_Snapshot_Lambda), 5 Firehose
-delivery streams, 2 EventBridge rules (the CloudTrail events rule and the
-new daily Licensed Users Snapshot schedule that invokes
-Licensed_Users_Snapshot_Lambda), IAM roles for
-Lambda/Firehose/CloudWatch Logs/EventBridge, and CloudWatch Logs subscription
-filters connecting Step 1's log groups to Firehose.
+Terraform creates the following role policies in `terraform/11-security-iam.tf`.
+Possession of `iam:PutRolePolicy` lets the deployer install these policies, but
+does not grant their runtime actions to the deployer identity.
 
-  - s3:CreateBucket, PutBucketPolicy, PutBucketVersioning, PutEncryption
-    Configuration, PutBucketPublicAccessBlock, PutBucketOwnershipControls,
-    GetBucketLocation, ListBucket, PutObject, GetObject,
-    ListBucketMultipartUploads, ListMultipartUploadParts, AbortMultipartUpload
-  - lambda:CreateFunction, UpdateFunctionCode, UpdateFunctionConfiguration,
-    GetFunction, DeleteFunction, AddPermission, RemovePermission,
-    TagResource, PublishVersion
-  - firehose:CreateDeliveryStream, DescribeDeliveryStream,
-    DeleteDeliveryStream, UpdateDestination, TagDeliveryStream
-  - events:PutRule, DescribeRule, DeleteRule, PutTargets, RemoveTargets,
-    TagResource
-  - logs:PutSubscriptionFilter, DeleteSubscriptionFilter,
-    DescribeSubscriptionFilters
-  - iam:CreateRole, DeleteRole, GetRole, PutRolePolicy, DeleteRolePolicy,
-    GetRolePolicy, AttachRolePolicy, DetachRolePolicy,
-    ListAttachedRolePolicies, ListRolePolicies, TagRole,
-    PassRole (needed so CloudFormation can assign these roles to Lambda,
-    Firehose, and EventBridge)
-  - kms:CreateGrant, RevokeGrant, ListGrants, Decrypt, Encrypt,
-    GenerateDataKey, DescribeKey   (on the Step-1 KMS key — data lake and
-    Firehose streams reuse it)
+TerraformProvisioner Lambda
+  - CloudWatch Logs write access to its log group
+  - SSM ownership markers under `/quick-observability/*`
+  - Athena DDL on the managed workgroup and Glue catalog management
+  - scoped S3 and Athena-results access
+  - KMS cryptographic access on the deployment key
+  - QuickSight lifecycle operations for the theme, data source, seven datasets,
+    analysis, dashboard, and topic
 
-NOTE ON A KNOWN GAP FOUND DURING DEPLOYMENT:
-The IAM role that CloudWatch Logs assumes to write into Firehose (created by
-this stack) needs its own KMS Decrypt/Encrypt/GenerateDataKey grant on the
-data lake key — not just the Firehose service role. If this permission is
-missing, subscription filter creation fails with a KMS grant error even
-though the KMS key and other IAM roles look correctly configured. This repo's
-CDK code (cdk/pipeline_stack.py) already grants this; flagged here in case
-your organization further restricts IAM policy content beyond what CDK
-generates.
+LicensedUsersSnapshot Lambda
+  - CloudWatch Logs write access
+  - `quicksight:ListUsers`
+  - `s3:PutObject` only under `licensed-users-snapshot/*`
+  - KMS Encrypt/GenerateDataKey on the deployment key
 
-NOTE ON THE LICENSED USERS SNAPSHOT LAMBDA'S OWN PERMISSIONS — DEPLOY-TIME
-vs. RUNTIME:
-The list above is what the DEPLOYING identity needs to CREATE the pipeline
-resources (the iam:CreateRole/PutRolePolicy/etc. actions already cover
-creating a new IAM role and attaching a new policy, whatever its content).
-It is a separate concern from what the Licensed_Users_Snapshot_Lambda's OWN
-execution role is allowed to do once running. cdk/pipeline_stack.py already
-creates a dedicated least-privilege role for this Lambda (separate from the
-shared Firehose-transform Lambda role) granting only:
-  - quicksight:ListUsers (Resource: "*" — QuickSight ListUsers has no
-    resource-level ARN to scope to)
-  - s3:PutObject scoped to
-    arn:aws:s3:::<data-lake-bucket>/licensed-users-snapshot/*
-  - kms:Encrypt, kms:GenerateDataKey on the Step-1 KMS key
-No changes are needed in this document's Action lists for that role — it is
-a RUNTIME grant defined inline in the CDK app, not something the deploying
-identity's own IAM policy needs to enumerate.
+Transform, Firehose, CloudWatch Logs delivery, and EventBridge roles are scoped
+to their log, stream, Lambda, S3-prefix, and KMS requirements. The existing
+`aws-quicksight-service-role-v0` receives a deployment-specific inline policy
+for Athena, Glue, S3, and KMS access.
 
 --------------------------------------------------------------------------------
-4. STEP 3 — Data catalog (scripts/setup_datacatalog.py via deploy.py --datacatalog)
+3. CLOUDFORMATION CUSTOM-RESOURCE BOUNDARY
 --------------------------------------------------------------------------------
 
-Creates: a Glue database, 6 Athena tables, and 8 Athena views over the S3
-data lake (including the licensed_users_snapshot table and the
-licensed_users_activity / function_usage_distribution views added for the
-Licensed Users pipeline and dashboard sheet).
+The CloudFormation stack contains two custom resources only. CloudFormation
+invokes the provisioner through a Lambda permission restricted to
+`cloudformation.amazonaws.com` and the source account. Sending a response to
+the presigned ResponseURL requires no IAM action.
 
-  - glue:CreateDatabase, GetDatabase, DeleteDatabase, CreateTable, GetTable,
-    GetTables, UpdateTable, DeleteTable, BatchCreatePartition
-  - athena:StartQueryExecution, GetQueryExecution, GetQueryResults,
-    StopQueryExecution, GetWorkGroup, ListWorkGroups
-  - s3:GetBucketLocation, ListBucket, GetObject, PutObject
-    (on the data lake bucket AND a separate bucket for Athena query results
-    — create a dedicated query-results bucket if one doesn't already exist;
-    it must be reachable/owned by the deploying account and region)
-
-ACCESS CONTROL MODE — choose ONE:
-
-  (A) IAM access control (--access-control iam): no further permissions
-      needed beyond the above. Recommended unless column-level restrictions
-      on sensitive chat content are required.
-
-  (B) AWS Lake Formation (--access-control lakeformation): the deploying
-      identity must ALSO be registered as a Lake Formation administrator
-      (see: DataLakeAdmins in
-      https://docs.aws.amazon.com/lake-formation/latest/dg/getting-started-setup.html#create-data-lake-admin ).
-      This is an ACCOUNT-WIDE privilege affecting every Lake
-      Formation-governed resource, not just this project — have your Lake
-      Formation admin grant this deliberately, or use IAM mode instead if
-      that's not something your organization wants to do casually.
-      Additionally needs:
-        - lakeformation:RegisterResource, DeregisterResource,
-          DescribeResource, GrantPermissions, RevokePermissions,
-          GetDataLakeSettings, PutDataLakeSettings
-        - kms:PutKeyPolicy, GetKeyPolicy (to grant the Lake Formation
-          service-linked role Decrypt/GenerateDataKey on the data lake key)
-        - iam:GetRole (to verify the Lake Formation service-linked role
-          exists before editing the KMS key policy)
+Delete depends on successful provisioner cleanup. A timeout or failed
+QuickSight/Athena operation can block `terraform destroy`.
 
 --------------------------------------------------------------------------------
-5. STEP 4 — Quick Sight dashboard (deploy.py --dashboard)
+4. ACCOUNT PREREQUISITES
 --------------------------------------------------------------------------------
 
-Creates: a custom Quick Sight theme, an Athena data source, 7 SPICE datasets
-(chat-activity, feedback-analysis, agent-hours-usage, api-audit-trail,
-index-usage, licensed-users, function-usage-distribution) with daily refresh
-schedules, an analysis, and a dashboard — including the new "Licensed Users"
-sheet listing licensed users inactive beyond a configurable threshold.
-
-  - quicksight:CreateTheme, DescribeTheme, UpdateTheme, DeleteTheme,
-    UpdateThemePermissions, DescribeThemePermissions, CreateThemeAlias,
-    ListThemeAliases, ListThemeVersions
-  - quicksight:CreateDataSource, DescribeDataSource, UpdateDataSource,
-    DeleteDataSource, UpdateDataSourcePermissions,
-    DescribeDataSourcePermissions, PassDataSource
-  - quicksight:CreateDataSet, DescribeDataSet, UpdateDataSet, DeleteDataSet,
-    UpdateDataSetPermissions, DescribeDataSetPermissions, PassDataSet,
-    DescribeIngestion, ListIngestions, CreateIngestion, CancelIngestion
-  - quicksight:CreateRefreshSchedule, DescribeRefreshSchedule,
-    UpdateRefreshSchedule, DeleteRefreshSchedule, ListRefreshSchedules
-  - quicksight:CreateAnalysis, DescribeAnalysis, UpdateAnalysis,
-    DeleteAnalysis, QueryAnalysis, RestoreAnalysis, UpdateAnalysisPermissions,
-    DescribeAnalysisPermissions
-  - quicksight:CreateDashboard, DescribeDashboard, UpdateDashboard,
-    DeleteDashboard, QueryDashboard, ListDashboardVersions,
-    UpdateDashboardPermissions, DescribeDashboardPermissions,
-    UpdateDashboardPublishedVersion
-  - quicksight:ListUsers, DescribeUser   (to auto-detect / verify the
-    dashboard owner's Quick Sight user ARN)
-
-IMPORTANT — permissions that live OUTSIDE standard IAM and are easy to miss:
-
-  1. The Quick Sight service role (aws-quicksight-service-role-v0, or
-     aws-quicksight-s3-consumers-role-v0 if present) must be authorized, via
-     Quick Sight's own "Manage Quick Sight -> Security & permissions ->
-     AWS resources" setting, to access:
-       - Athena (toggle on)
-       - The specific S3 buckets used: the data lake bucket AND the Athena
-         query-results bucket
-     This is a separate customer-managed IAM policy
-     (AWSQuickSightS3Policy) that Quick Sight's console UI maintains as an
-     allow-list. New buckets are NOT added automatically — someone with
-     Quick Sight admin rights must add them, either via that console screen
-     or by editing the policy directly.
-
-  2. Check for any existing Quick Sight IAM Policy Assignments in the
-     account (quicksight:ListIAMPolicyAssignments /
-     DescribeIAMPolicyAssignment) that apply to "all users" or "all groups".
-     These act as SESSION POLICIES on top of the Quick Sight service role —
-     they INTERSECT with (restrict, not add to) whatever the role's own IAM
-     policies allow. A narrow pre-existing assignment (e.g. one scoped to
-     only S3, set up for an unrelated purpose) will silently block Quick
-     Sight's Athena access account-wide, even though standard IAM policy
-     simulation reports the action as "allowed". If one exists, it needs to
-     be broadened (not necessarily replaced) to include Athena/Glue access,
-     or scoped to exclude the identity used for this deployment.
+  - An active Amazon Quick/QuickSight subscription in the target Region.
+  - Existing `aws-quicksight-service-role-v0` role.
+  - A valid QuickSight owner user ARN in the selected namespace.
+  - Permission to attach the deployment-specific inline policy to the existing
+    QuickSight service role.
+  - No SCP, permission boundary, KMS policy, or QuickSight IAM policy assignment
+    that denies required calls.
 
 --------------------------------------------------------------------------------
-6. STEP 5 — Quick Sight Topic (scripts/create_topic.py)
+5. APPROVED TERRAFORM DESTROY
 --------------------------------------------------------------------------------
 
-  - quicksight:CreateTopic, DescribeTopic, UpdateTopic, DeleteTopic
-  - quicksight:UpdateTopicPermissions, DescribeTopicPermissions
-  - quicksight:CreateTopicRefreshSchedule, UpdateTopicRefreshSchedule,
-    DeleteTopicRefreshSchedule, ListTopicRefreshSchedules,
-    DescribeTopicRefreshSchedule
-  - quicksight:ListIngestions   (used to verify each dataset has data before
-    creating the topic)
+Default lifecycle guards prevent bucket and KMS deletion. An approved full
+destroy also requires the S3 object/version/multipart cleanup actions in
+`iam-policy.yaml`. Set `force_destroy_buckets = true`, apply it, back up data,
+remove the three local `prevent_destroy` guards, then run destroy. Never delete
+a key while retained encrypted objects depend on it.
 
 --------------------------------------------------------------------------------
-7. STEP 6 — Custom chat agent (Amazon Quick console, manual, no AWS IAM
-   permissions beyond standard Amazon Quick console access — out of scope
-   for this IAM policy)
+6. REVIEW LIMITATIONS
 --------------------------------------------------------------------------------
 
---------------------------------------------------------------------------------
-8. CLEANUP (cleanup.py)
---------------------------------------------------------------------------------
-
-Needs delete/destroy permissions matching everything created above, plus:
-
-  - quicksight:DeleteTopic
-  - athena:StartQueryExecution (to run "DROP DATABASE ... CASCADE")
-  - s3:DeleteObject, DeleteObjectVersion  (NOT bucket deletion — the data
-    lake bucket and KMS key are retained by design; cleanup.py does not and
-    should not delete them automatically)
-  - lakeformation:DeregisterResource, RevokePermissions (only if Lake
-    Formation mode was used)
-
---------------------------------------------------------------------------------
-SUMMARY OF THINGS THAT ARE EASY TO OVERLOOK
---------------------------------------------------------------------------------
-
-  1. quicksight:AllowVendedLogDeliveryForResource is a distinct, easily
-     missed permission — without it, Step 1 fails silently on the vended
-     logs delivery setup.
-  2. Quick Sight's "AWS resources" S3 allow-list (see Step 4 note) is a
-     separate authorization layer from IAM and is NOT covered by attaching
-     an IAM policy alone — someone with Quick Sight admin rights must also
-     enable Athena and add the S3 buckets through the Quick Sight console
-     or by editing AWSQuickSightS3Policy directly.
-  3. Pre-existing Quick Sight IAM Policy Assignments scoped to "all
-     users"/"all groups" can silently block this deployment even with
-     otherwise-correct IAM policies. Check for these BEFORE deploying Step 4
-     if Athena connection tests fail with "not authorized" errors that
-     don't match your attached IAM policies.
-  4. If using Lake Formation access control, the deploying identity must be
-     added as a Lake Formation administrator — an account-wide change,
-     separate from any IAM policy — before Step 3 can succeed with that mode.
+The baseline was reconciled with the repository and pinned Terraform AWS
+provider 6.33.0. Provider upgrades can add API calls. Before changing provider
+versions or organizational controls, test init/plan/apply/destroy in an isolated
+account and use CloudTrail denied events to reconcile the reviewed policy.
 ================================================================================
